@@ -1,0 +1,23 @@
+# Maven
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradle leftovers (removed)
+build/
+.gradle/
+gradle/
+gradlew
+gradlew.bat
