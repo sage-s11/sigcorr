@@ -23,6 +23,51 @@ public final class AttackPatternCatalog {
     private AttackPatternCatalog() {} // No instances
 
     /**
+     * ATTACK 9: Diameter Reconnaissance + GTP Session Hijack
+     *
+     * Cross-protocol: Diameter AIR (authentication probe) followed by
+     * GTP-C Create-Session targeting the same IMSI. The attacker probes
+     * the subscriber via Diameter, then establishes a data session via GTP.
+     */
+    public static AttackPattern diameterReconWithSession() {
+        return AttackPattern.builder()
+                .patternId("ATK-009")
+                .name("Diameter Recon + GTP Session Hijack")
+                .description("Diameter Authentication-Information-Request probes subscriber, "
+                        + "followed by GTP-C Create-Session-Request for the same IMSI. "
+                        + "Cross-protocol reconnaissance leading to session establishment.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(5))
+                .requireSameSource(false)
+                .mitreTechniques(Set.of("T1430", "T1565"))
+                .addStep(1, SignalingOperation.DIA_AUTH_INFO_REQUEST)
+                .addStep(2, SignalingOperation.GTP_CREATE_SESSION_REQUEST)
+                .build();
+    }
+
+    /**
+     * ATTACK 10: Diameter Location Hijack
+     *
+     * Diameter AIR followed by ULR — the attacker probes authentication
+     * then re-registers the subscriber to their own MME.
+     */
+    public static AttackPattern diameterLocationHijack() {
+        return AttackPattern.builder()
+                .patternId("ATK-010")
+                .name("Diameter Location Hijack")
+                .description("Diameter Authentication-Information-Request followed by "
+                        + "Update-Location-Request for the same IMSI from the same origin. "
+                        + "The attacker probes auth vectors then re-registers the subscriber.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofSeconds(120))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1636"))
+                .addStep(1, SignalingOperation.DIA_AUTH_INFO_REQUEST)
+                .addStep(2, SignalingOperation.DIA_UPDATE_LOCATION_REQUEST)
+                .build();
+    }
+
+    /**
      * Get all built-in attack patterns.
      */
     public static List<AttackPattern> getAllPatterns() {
@@ -34,7 +79,9 @@ public final class AttackPatternCatalog {
                 diameterSpoofWithSs7Fallback(),
                 subscriberDenialOfService(),
                 callInterceptionViaForwarding(),
-                crossProtocolReconnaissance()
+                crossProtocolReconnaissance(),
+                diameterReconWithSession(),
+                diameterLocationHijack()
         );
     }
 

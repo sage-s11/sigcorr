@@ -309,7 +309,7 @@ public class TsharkBridge {
         if (commandCode < 0) return null;
 
         String requestFlag = extractString(layers, "diameter_flags_request");
-        boolean isRequest = "1".equals(requestFlag);
+        boolean isRequest = "1".equals(requestFlag) || "True".equals(requestFlag) || "true".equals(requestFlag);
 
         SignalingOperation operation = SignalingOperation.fromDiameterCommand(commandCode, isRequest);
         if (operation == null) return null;
