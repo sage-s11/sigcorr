@@ -1,0 +1,176 @@
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                SS7/MAP FIELD EXTRACTION FIX - QUICK REFERENCE         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+THE PROBLEM
+───────────
+MAP pcaps decode correctly (tshark -V shows full protocol stack), but
+tshark -T ek returns empty IMSI/MSISDN fields → 0 events → 0 alerts.
+
+ROOT CAUSE
+──────────
+Used wrong field names: e212.imsi and gsm_map.msisdn don't populate in
+EK JSON because they're operation-specific protocol fields.
+
+THE FIX
+───────
+Use display filter convenience fields that work across ALL MAP operations:
+
+  ┌─────────────────────┬──────────────────────┬─────────────────────┐
+  │ Data Type           │ OLD (broken)         │ NEW (working)       │
+  ├─────────────────────┼──────────────────────┼─────────────────────┤
+  │ IMSI                │ e212.imsi            │ gsm_map.imsi_digits │
+  │ MSISDN              │ gsm_map.msisdn       │ gsm_map.msisdn_digits│
+  │ SCCP Calling        │ sccp.calling.digits  │ (unchanged)         │
+  │ SCCP Called         │ sccp.called.digits   │ (unchanged)         │
+  │ MAP Operation       │ gsm_old.localValue   │ (unchanged)         │
+  └─────────────────────┴──────────────────────┴─────────────────────┘
+
+CODE CHANGES (TsharkBridge.java)
+─────────────────────────────────
+
+1. TSHARK_FIELDS array (line ~45):
+
+   REMOVE:  "e212.imsi", "gsm_map.msisdn"
+   ADD:     "gsm_map.imsi_digits", "gsm_map.msisdn_digits"
+
+2. parseEvent() method (line ~180):
+
+   CHANGE:  String imsi = getField(layers, "e212_imsi");
+   TO:      String imsi = getField(layers, "gsm_map_imsi_digits");
+
+   CHANGE:  String msisdn = getField(layers, "gsm_map_msisdn");
+   TO:      String msisdn = getField(layers, "gsm_map_msisdn_digits");
+
+VALIDATION COMMANDS
+───────────────────
+
+# Test OLD extraction (should be EMPTY):
+tshark -r test-pcaps/ss7_location_tracking.pcap -Y "gsm_map" -T ek \
+  -e frame.time_epoch -e e212.imsi -e gsm_map.msisdn | grep -v index
+
+# Test NEW extraction (should have DATA):
+tshark -r test-pcaps/ss7_location_tracking.pcap -Y "gsm_map" -T ek \
+  -e frame.time_epoch -e gsm_map.imsi_digits -e gsm_map.msisdn_digits \
+  | grep -v index | python3 -m json.tool
+
+# Rebuild and run:
+mvn clean package -DskipTests
+java -jar target/sigcorr-0.1.0.jar analyze \
+  test-pcaps/ss7_location_tracking.pcap --verbose
+
+EXPECTED RESULTS
+────────────────
+✓ tshark extracts: gsm_map_imsi_digits, gsm_map_msisdn_digits populated
+✓ Events parsed: 4 MAP events with IMSI/MSISDN fields
+✓ Alert fires: ATK-001 (Silent Location Tracking)
+✓ Correlation works: Events linked by subscriber identity
+✓ Cross-protocol ready: MAP → Diameter → GTP correlation enabled
+
+WHY IT WORKS
+────────────
+Wireshark's MAP dissector populates these "convenience fields" for ANY
+operation that carries IMSI/MSISDN. They're display filter fields, not
+protocol fields, but tshark -T ek can extract them just like protocol
+fields. The dots→underscores conversion creates JSON keys:
+
+  gsm_map.imsi_digits → gsm_map_imsi_digits (JSON key)
+  gsm_map.msisdn_digits → gsm_map_msisdn_digits (JSON key)
+
+FIELD REFERENCE
+───────────────
+SS7/MAP Field Mappings (Tshark → JSON → Java):
+
+  Tshark Field              JSON Key                  Java Variable
+  ────────────────────────  ────────────────────────  ──────────────
+  gsm_map.imsi_digits   →   gsm_map_imsi_digits   →   String imsi
+  gsm_map.msisdn_digits →   gsm_map_msisdn_digits →   String msisdn
+  sccp.calling.digits   →   sccp_calling_digits   →   String sccpCalling
+  sccp.called.digits    →   sccp_called_digits    →   String sccpCalled
+  gsm_old.localValue    →   gsm_old_localValue    →   String mapOperation
+
+MAP OPERATION CODES
+───────────────────
+  22 = SendRoutingInfo (SRI)       - Get IMSI from MSISDN
+  71 = ProvideSubscriberInfo (PSI) - Get location from IMSI
+   2 = UpdateLocation              - HLR location update
+   7 = InsertSubscriberData        - Push subscriber profile
+  46 = SendAuthenticationInfo      - Get auth vectors
+
+ATTACK PATTERNS (SS7/MAP)
+──────────────────────────
+  ATK-001: Silent Location Tracking     (SRI → PSI)
+  ATK-002: SMS Interception             (SRI → ForwardSM)
+  ATK-003: Subscriber Enumeration       (SRI flood)
+  ATK-004: MSISDN Spoofing              (UpdateLocation with fake IMSI)
+  ATK-005: HLR Flooding                 (SAI flood)
+
+CROSS-PROTOCOL PATTERNS
+───────────────────────
+  ATK-009: Cross-Protocol Recon         (MAP SRI → Diameter AIR → GTP)
+  ATK-010: Location Hijack              (Diameter ULR spoofing)
+
+TROUBLESHOOTING
+───────────────
+Issue: "gsm_map_imsi_digits still empty"
+→ Check Wireshark version: tshark -G fields | grep gsm_map.imsi_digits
+→ Verify pcap has MAP layer: tshark -r file.pcap -V | grep gsm_map
+
+Issue: "Tests fail after fix"
+→ Verify you updated BOTH field array AND parseEvent()
+→ Check JSON key format: underscore not dot (gsm_map_imsi_digits)
+
+Issue: "No alerts despite events parsed"
+→ Check IdentityResolver learning mappings (add debug logging)
+→ Verify pattern step sequence matches event order
+→ Check temporal window (default 5min - may need adjustment)
+
+FILES IN THIS PACKAGE
+─────────────────────
+📄 MAP_FIX_STRATEGY.md              - Detailed problem analysis
+📄 MAP_FIX_GUIDE.md                 - Step-by-step implementation
+📄 TsharkBridge_MAP_Fix.patch.java - Annotated code changes
+📄 verify_map_fix.sh                - Pre-flight test script
+📄 analyze_map_pcap.py              - Diagnostic analyzer
+📄 MAP_QUICK_REF.txt                - This file
+
+ONE-LINER FIX
+─────────────
+For the impatient:
+
+  sed -i 's/e212\.imsi/gsm_map.imsi_digits/g' \
+         src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java
+  
+  sed -i 's/gsm_map\.msisdn/gsm_map.msisdn_digits/g' \
+         src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java
+  
+  sed -i 's/e212_imsi/gsm_map_imsi_digits/g' \
+         src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java
+  
+  sed -i 's/gsm_map_msisdn"/gsm_map_msisdn_digits"/g' \
+         src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java
+
+  mvn clean package && java -jar target/sigcorr-0.1.0.jar \
+    analyze test-pcaps/ss7_location_tracking.pcap --verbose
+
+CONTACT & SUPPORT
+─────────────────
+GitHub: sage-s11/sigcorr
+Author: Xyzzz (sage-s11)
+Context: DDI/DNS security researcher, network engineer
+Related: DNS-over-QUIC downgrade paper (Computers & Security, 2026)
+
+REFERENCES
+──────────
+Wireshark Display Filters:
+  https://www.wireshark.org/docs/dfref/g/gsm_map.html
+
+SS7 MAP Protocol Spec:
+  3GPP TS 29.002 (Mobile Application Part specification)
+
+Tshark JSON Output:
+  tshark -G elastic-mapping (shows EK field mappings)
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                        END OF QUICK REFERENCE                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
