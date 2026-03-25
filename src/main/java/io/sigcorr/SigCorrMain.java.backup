@@ -5,8 +5,6 @@ import io.sigcorr.detection.patterns.AttackPatternCatalog;
 import io.sigcorr.detection.scoring.SecurityAlert;
 import io.sigcorr.ingest.hex.ScenarioGenerator;
 import io.sigcorr.ingest.tshark.TsharkBridge;
-import io.sigcorr.config.SigCorrConfig;
-import io.sigcorr.evidence.EvidenceExporter;
 import io.sigcorr.output.json.JsonOutputFormatter;
 import io.sigcorr.core.event.SignalingEvent;
 import org.slf4j.Logger;
@@ -26,7 +24,6 @@ public class SigCorrMain {
     private static boolean verbose = false;
     private static boolean quiet = false;
     private static boolean jsonOutput = false;
-    private static boolean exportEvidence = false;
 
     private static final String BANNER = """
 
@@ -64,7 +61,6 @@ public class SigCorrMain {
                 case "--verbose", "-v" -> verbose = true;
                 case "--quiet", "-q" -> quiet = true;
                 case "--json" -> jsonOutput = true;
-                case "--export-evidence" -> exportEvidence = true;
                 default -> remaining.add(arg);
             }
         }
@@ -85,17 +81,6 @@ public class SigCorrMain {
     private static void runAnalyze(String pcapPath) {
         Path path = Path.of(pcapPath);
         if (!Files.exists(path)) { System.err.println("File not found: " + pcapPath); System.exit(1); }
-        
-        // Load configuration
-        SigCorrConfig config;
-        try {
-            config = SigCorrConfig.loadDefault();
-            if (verbose) System.out.println("Loaded configuration from sigcorr-config.yaml");
-        } catch (IOException e) {
-            if (verbose) System.out.println("No config file found, using defaults");
-            config = SigCorrConfig.createDefault();
-        }
-        
         if (!quiet) { System.out.println(BANNER); System.out.println("Analyzing: " + path.toAbsolutePath() + "\n"); }
 
         TsharkBridge bridge = new TsharkBridge();
@@ -119,14 +104,6 @@ public class SigCorrMain {
             CorrelationEngine engine = CorrelationEngine.createDefault();
             engine.processBatch(events);
 
-            // Export evidence if requested or auto-export enabled
-            List<SecurityAlert> alerts = engine.getAlerts();
-            boolean shouldExport = exportEvidence || config.isAutoExportEnabled();
-            if (shouldExport && !alerts.isEmpty()) {
-                exportEvidencePcaps(alerts, path, events, config);
-            }
-
-
             if (jsonOutput) {
                 System.out.println(new JsonOutputFormatter().formatReport(engine));
             } else {
@@ -137,33 +114,6 @@ public class SigCorrMain {
             if (verbose) e.printStackTrace();
             System.exit(1);
         }
-    }
-
-
-    /**
-     * Export evidence pcap files for detected alerts
-     */
-    private static void exportEvidencePcaps(List<SecurityAlert> alerts, Path sourcePcap, 
-                                            List<SignalingEvent> events, SigCorrConfig config) {
-        Path evidenceDir = Path.of(config.getEvidenceDirectory());
-        EvidenceExporter exporter = new EvidenceExporter(evidenceDir);
-        
-        if (!exporter.isEditcapAvailable()) {
-            System.err.println("WARNING: editcap not found - cannot export evidence pcaps");
-            return;
-        }
-        
-        System.out.println("\n─────────────────────────────────────────────────────────");
-        System.out.println("Exporting Evidence PCAPs");
-        System.out.println("─────────────────────────────────────────────────────────");
-        
-        for (SecurityAlert alert : alerts) {
-            Path evidencePath = exporter.exportEvidence(alert, sourcePcap, events);
-            if (evidencePath != null) {
-                System.out.printf("  ✓ %s → %s%n", alert.getMatchedPattern().getPatternId(), evidencePath.getFileName());
-            }
-        }
-        System.out.println();
     }
 
     private static void printResults(CorrelationEngine engine) {
@@ -291,11 +241,6 @@ public class SigCorrMain {
                   --verbose, -v         Debug output with event details
                   --quiet, -q           Suppress banner and info messages
                   --json                Output results as JSON
-                  --export-evidence     Export evidence pcaps for detected alerts
-                
-                Configuration:
-                  Config file: ./sigcorr-config.yaml (optional)
-                  Evidence output: ./evidence/ (configurable)
                 """);
     }
 }

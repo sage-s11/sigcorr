@@ -1,0 +1,42 @@
+# SigCorr Configuration File
+# Passive Cross-Interface Signaling Security Correlator
+
+# Alert severity thresholds
+severity:
+  critical_threshold: 95
+  high_threshold: 75
+  medium_threshold: 50
+
+# Attack pattern enablement
+patterns:
+  ATK-001: true
+  ATK-002: true
+  ATK-003: true
+  ATK-004: true
+  ATK-005: true
+  ATK-006: true
+  ATK-007: true
+  ATK-008: true
+  ATK-009: true
+  ATK-010: true
+
+# Correlation window
+correlation:
+  time_window_seconds: 300
+
+# Evidence export
+evidence:
+  auto_export: true
+  output_directory: ./evidence
+  include_context_packets: 2
+
+# Whitelisting
+whitelist:
+  enabled: false
+  trusted_gt_pairs: []
+
+# Output formats
+output:
+  json: true
+  console: true
+  syslog: false

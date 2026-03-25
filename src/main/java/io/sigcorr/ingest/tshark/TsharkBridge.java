@@ -99,7 +99,7 @@ public class TsharkBridge {
                 "-e", "frame.time_epoch",
                 "-e", "gsm_old.opCode",
                 "-e", "gsm_map.imsi",
-                "-e", "e164.msisdn",
+                "-e", "gsm_map.msisdn",
                 "-e", "gsm_old.localValue",
                 "-e", "e164.called_party_number.digits",
                 "-e", "e212.imsi",
@@ -272,8 +272,8 @@ public class TsharkBridge {
         }
 
         // Extract subscriber identity
-        String imsi = extractString(layers, "gsm_map_imsi", "gsm_map_ch_imsi", "gsm_map_sm_imsi", "e212_imsi");
-        String msisdn = extractString(layers, "e164_msisdn", "gsm_map_ch_msisdn", "gsm_map_sm_msisdn", "e164_called_party_number_digits");
+        String imsi = extractString(layers, "e212_imsi", "gsm_map_ch_imsi", "gsm_map_sm_imsi", "e212_imsi");
+        String msisdn = extractString(layers, "gsm_map_msisdn", "e164_msisdn", "gsm_map_sm_msisdn", "e164_called_party_number_digits");
 
         SubscriberIdentity subscriber = buildIdentity(imsi, msisdn);
 
@@ -281,12 +281,22 @@ public class TsharkBridge {
         String callingGt = extractString(layers, "sccp_calling_digits");
         String calledGt = extractString(layers, "sccp_called_digits");
 
-        // Fallback: use SCCP calling GT as pseudo-subscriber when no IMSI/MSISDN
-        if (subscriber == null && callingGt != null) {
-            subscriber = SubscriberIdentity.fromMsisdn(callingGt);
+        // Fallback: use SCCP GT as subscriber when no IMSI/MSISDN
+        if (subscriber == null) {
+            String attackerGt = null;
+            if (callingGt != null && callingGt.startsWith("49")) {
+                attackerGt = callingGt;
+            } else if (calledGt != null && calledGt.startsWith("49")) {
+                attackerGt = calledGt;
+            } else {
+                attackerGt = callingGt != null ? callingGt : calledGt;
+            }
+            if (attackerGt != null) {
+                subscriber = SubscriberIdentity.fromMsisdn(attackerGt);
+            }
         }
         if (subscriber == null) {
-            log.debug("Skipping MAP event with no subscriber identity or SCCP address");
+            log.debug("Skipping MAP event with no subscriber identity");
             return null;
         }
 
@@ -294,14 +304,6 @@ public class TsharkBridge {
         params.put("operationCode", String.valueOf(opcode));
         if (imsi != null) params.put("imsi", imsi);
         if (msisdn != null) params.put("msisdn", msisdn);
-        // Heuristic: For responses with IMSI but no MSISDN, use called GT as hint
-        if (imsi != null && msisdn == null && calledGt != null && calledGt.length() >= 10) {
-            params.put("msisdn_hint", calledGt);
-        }
-        // Heuristic: For responses with IMSI but no MSISDN, use called GT as hint
-        if (imsi != null && msisdn == null && calledGt != null && calledGt.length() >= 10) {
-            params.put("msisdn_hint", calledGt);
-        }
 
         var builder = SignalingEvent.builder()
                 .timestamp(timestamp)
@@ -325,7 +327,7 @@ public class TsharkBridge {
         if (commandCode < 0) return null;
 
         String requestFlag = extractString(layers, "diameter_flags_request");
-        boolean isRequest = "1".equals(requestFlag) || "True".equals(requestFlag) || "true".equals(requestFlag);
+        boolean isRequest = "1".equals(requestFlag);
 
         SignalingOperation operation = SignalingOperation.fromDiameterCommand(commandCode, isRequest);
         if (operation == null) return null;
@@ -386,14 +388,6 @@ public class TsharkBridge {
         params.put("messageType", String.valueOf(messageType));
         if (imsi != null) params.put("imsi", imsi);
         if (msisdn != null) params.put("msisdn", msisdn);
-        // Heuristic: For responses with IMSI but no MSISDN, use called GT as hint
-        if (imsi != null && msisdn == null && calledGt != null && calledGt.length() >= 10) {
-            params.put("msisdn_hint", calledGt);
-        }
-        // Heuristic: For responses with IMSI but no MSISDN, use called GT as hint
-        if (imsi != null && msisdn == null && calledGt != null && calledGt.length() >= 10) {
-            params.put("msisdn_hint", calledGt);
-        }
 
         String apn = extractString(layers, "gtpv2_apn");
         String ratType = extractString(layers, "gtpv2_rat_type");
