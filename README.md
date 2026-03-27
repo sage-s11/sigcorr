@@ -207,17 +207,6 @@ sigcorr/
 └── test.sh
 ```
 
----
-
-## Roadmap
-
-- [x] v0.1.0 — Pcap-based detection, 22 patterns, cross-protocol correlation
-- [ ] v0.2.0 — Real-time stream processing (Kafka/tap input)
-- [ ] v0.3.0 — Response code analysis, volumetric detection
-- [ ] v1.0.0 — Production-ready with enterprise features
-
----
-
 ## References
 
 - [GSMA FS.11](https://www.gsma.com/security/resources/fs-11-ss7-interconnect-security-monitoring-guidelines/) — SS7 Security Monitoring Guidelines
@@ -236,13 +225,3 @@ AGPL-3.0 — See [LICENSE](LICENSE) for details.
 ## Author
 
 **Shreyas S** (GitHub: [@sage-s11](https://github.com/sage-s11))
-
-Security researcher specializing in DNS/DDI protocols and telecom signaling security.
-
----
-
-## Acknowledgments
-
-- Wireshark project for tshark and protocol dissectors
-- P1 Security for SS7 security research and inspiration
-- The telecom security research community
