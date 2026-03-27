@@ -235,7 +235,7 @@ AGPL-3.0 — See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**Xyzzz** (GitHub: [@sage-s11](https://github.com/sage-s11))
+**Shreyas S** (GitHub: [@sage-s11](https://github.com/sage-s11))
 
 Security researcher specializing in DNS/DDI protocols and telecom signaling security.
 
