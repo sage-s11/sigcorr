@@ -1,253 +1,248 @@
-# nfault
+# SigCorr
 
-**Structured network error classification for Node.js.**
+**Passive Cross-Protocol Attack Detection for Mobile Core Networks**
 
-Every networking library surfaces raw OS error codes when a connection fails. You get `ECONNREFUSED`, `ETIMEDOUT`, or `certificate has expired` — without layer classification, cause analysis, retryability guidance, or escalation signals. The result is fragile string-matching, inconsistent retry logic, and delayed alerting.
+SigCorr is the first open-source tool to detect cross-protocol attack chains spanning SS7/MAP, Diameter S6a, and GTPv2-C through unified subscriber identity correlation.
 
-`nfault` converts any raw network error into a structured, typed object with actionable fields.
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
+[![Java 17+](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 
-```
-╔══ NetworkError ────────────────────────────────────────────────
-  code              tls/cert_expired
-  layer             TLS
-  fault             remote
-  causeConfidence   ● high
+---
 
-  safeRetryable     false
-  safeMaxRetries    0
-  escalateAfter     true
+## Features
 
-  host              api.payments.internal:443
+- **Cross-protocol correlation** — Links SS7/MAP, Diameter S6a, and GTPv2-C events for the same subscriber
+- **Identity resolution** — Automatically correlates IMSI ↔ MSISDN across protocol boundaries  
+- **22 attack patterns** — Detects location tracking, interception, DoS, auth harvesting, and more
+- **Zero false positives** — Validated against 20+ public telecom pcap samples
+- **Passive analysis** — Offline pcap analysis, no network injection
 
-  hint              TLS certificate has expired. Ops must renew immediately.
-                    Add expiry monitoring at 30/14/7 days.
+---
 
-  ── Possible causes ──────────────────────────────────────────
-  1. cert_not_renewed  ✕
-     Certificate not renewed before expiry
-     → Alert ops and security team immediately.
+## Quick Start
 
-  2. autorenewal_failed  ✕
-     Auto-renewal job (certbot/ACME) failed silently
-     → Check auto-renewal logs. Manual renewal required.
+### Prerequisites
 
-  3. clock_skew  ✕
-     Client/server clocks out of sync (NTP failure)
-     → Check system time against NTP.
-╚════════════════════════════════════════════════════════════════
-```
+- Java 17+ (tested with OpenJDK 21)
+- Maven 3.8+
+- tshark (Wireshark CLI) 3.6+
 
-## Key design insight
-
-> **Transience is a property of the *cause*, not the symptom.**
-> The same `dns/timeout` has causes that are fully self-healing, partially self-healing, or permanently broken. A single `transient: boolean` collapses this distinction and leads to infinite retries on non-recoverable failures. `nfault` exposes possible causes with per-cause retryability flags.
-
-## Install
+### Build
 
 ```bash
-npm install nfault
+git clone https://github.com/sage-s11/sigcorr.git
+cd sigcorr
+mvn clean package -DskipTests
 ```
 
-## Usage
-
-### Core — works with any error
-
-```ts
-import { classify } from 'nfault';
-
-try {
-  await fetch('https://api.example.com/data');
-} catch (err) {
-  const e = classify(err as Error, { host: 'api.example.com', method: 'GET' });
-
-  console.log(e.code);           // 'tls/cert_expired'
-  console.log(e.safeRetryable);  // false
-  console.log(e.hint);
-  console.log(e.escalateAfter);  // true
-
-  if (e.isSecurityEvent) alertSecurityTeam(e);
-  if (e.escalateAfter)   pagerduty.trigger(e);
-}
-```
-
-### With axios
-
-```ts
-import axios from 'axios';
-import { createAxiosInterceptor, formatSummary } from 'nfault';
-
-const client = axios.create({ baseURL: 'https://api.example.com' });
-
-client.interceptors.response.use(null, createAxiosInterceptor({
-  onError: (e) => {
-    logger.error(formatSummary(e));
-    if (e.escalateAfter)   pagerduty.trigger(e);
-    if (e.isSecurityEvent) securityChannel.alert(e);
-  }
-}));
-```
-
-### With fetch
-
-```ts
-import { fetchWithClassification } from 'nfault';
-
-try {
-  const res = await fetchWithClassification('https://api.example.com', {
-    method: 'POST'
-  });
-} catch (e) {
-  console.log(e.requiresIdempotencyCheck); // true — don't auto-retry POST
-  console.log(e.code);                     // 'tcp/reset'
-}
-```
-
-### With Winston / Pino
-
-```ts
-import winston from 'winston';
-import { classify, createWinstonErrorHandler } from 'nfault';
-
-const logger = winston.createLogger({
-  transports: [new winston.transports.Console()],
-  format: winston.format.json(),
-});
-
-const handleError = createWinstonErrorHandler(logger, {
-  onSecurityEvent: (e) => securityChannel.alert(e),
-  onEscalate:      (e) => pagerduty.trigger(e),
-});
-
-try {
-  await fetch('https://api.example.com');
-} catch (err) {
-  const e = classify(err as Error, { host: 'api.example.com' });
-  handleError(e);
-}
-```
-
-### With native node:http / node:https
-
-```ts
-import { requestWithClassification } from 'nfault';
-
-try {
-  const { body } = await requestWithClassification('https://api.example.com/data');
-} catch (e) {
-  console.log(e.code, e.hint);
-}
-```
-
-### DNS rolling-window detector
-
-```ts
-import { classify, DnsFailureDetector } from 'nfault';
-
-const detector = new DnsFailureDetector({ windowMs: 60000, minDistinctHosts: 3 });
-
-const e = classify(err, { host });
-const result = detector.record(e);
-// If 3+ distinct hosts fail within 60s:
-// result.causeConfidence → 'high'
-// result.possibleCauses[0].id → 'resolver_unreachable'
-// result.safeRetryable → false
-```
-
-## CLI
+### Analyze a PCAP
 
 ```bash
-npx nfault diagnose api.example.com
-npx nfault diagnose api.example.com 5432
-npx nfault diagnose api.example.com --tls
-npx nfault diagnose api.example.com --dns
-npx nfault diagnose api.example.com --tls --watch
-npx nfault diagnose api.example.com --tls --watch --interval 30
-npx nfault explain tls/cert_expired
-npx nfault list
-npx nfault check api.example.com
+java -jar target/sigcorr-0.1.0.jar analyze capture.pcap
 ```
 
-## Output modes
+### Run Tests
 
-```ts
-import { formatNetworkError, formatSummary, formatCompact } from 'nfault';
-
-// Full verbose — CLI / debugging only
-console.log(formatNetworkError(e));
-
-// Single line — safe for production logs, won't flood
-console.log(formatSummary(e));
-// → [nfault] tls/cert_expired | conf:high | fault:remote | retry:no | ↑escalate | api.example.com
-
-// JSON — for Datadog, Splunk, ELK pipelines
-console.log(formatCompact(e));
-// → {"code":"tls/cert_expired","layer":"tls","fault":"remote",...}
+```bash
+./test.sh
 ```
 
-## NetworkError schema
+---
 
-| Field | Description | Example |
-|---|---|---|
-| `.code` | Namespaced error identifier | `"tls/cert_expired"` |
-| `.layer` | Stack layer where failure occurred | `"dns" \| "tcp" \| "tls" \| "http"` |
-| `.causeConfidence` | How certain we are about root cause | `"high" \| "medium" \| "low"` |
-| `.possibleCauses[]` | Ordered causes with per-cause retryability | `[{ id, retryable, delay, action }]` |
-| `.fault` | Who is responsible | `"remote" \| "network" \| "config" \| "client"` |
-| `.safeRetryable` | Conservative retry flag | `true \| false` |
-| `.safeMaxRetries` | Max retries before mandatory escalation | `0 \| 1 \| 2 \| 3` |
-| `.safeDelay` | Suggested backoff in ms | `1000 \| 5000 \| null` |
-| `.escalateAfter` | Alert ops if retries exhausted? | `true \| false` |
-| `.isSecurityEvent` | Route to security team, not ops queue | `true \| false` |
-| `.requiresIdempotencyCheck` | Non-idempotent request — caller decides retry | `true \| false` |
-| `.hint` | Human-readable remediation hint | `"Check /etc/resolv.conf..."` |
+## Attack Patterns Detected
 
-## Error coverage — v1.0
+### SS7/MAP Attacks
 
-| Code | Layer | Confidence | Notes |
-|---|---|---|---|
-| `dns/timeout` | DNS | low → high* | *upgrades via rolling-window detector |
-| `dns/nxdomain` | DNS | high | |
-| `dns/servfail` | DNS | medium | |
-| `dns/refused` | DNS | high | |
-| `tcp/refused` | TCP | medium | |
-| `tcp/timeout` | TCP | low | |
-| `tcp/reset` | TCP | medium | |
-| `tls/cert_expired` | TLS | high | |
-| `tls/handshake_failed` | TLS | high | |
-| `tls/hostname_mismatch` | TLS | high | `isSecurityEvent: true` |
-| `tls/untrusted_cert` | TLS | medium | |
-| `tls/cert_revoked` | TLS | high | `isSecurityEvent: true` |
-| `http/rate_limited` | HTTP | high | Parses `Retry-After` header |
-| `http/auth_failure` | HTTP | medium | 401 retryable, 403 not |
-| `http/request_timeout` | HTTP | medium | 408 + 504 |
-| `http/server_error` | HTTP | medium | 500 + 502 + 503 |
-| `http/not_found` | HTTP | high | |
+| ID | Attack | Description |
+|----|--------|-------------|
+| ATK-001 | Silent Location Tracking | SRI followed by PSI to track subscriber |
+| ATK-002 | Interception Setup | SRI followed by ISD to redirect calls |
+| ATK-006 | Subscriber DoS | CancelLocation + DeleteSubscriberData |
+| ATK-011 | SMS Interception | SRI-SM followed by MT-ForwardSM |
+| ATK-014 | Auth Vector Harvesting | SRI followed by SendAuthInfo |
+| ATK-021 | IMSI Catcher Detection | Rogue UpdateLocation + SendAuthInfo |
 
-## Security event routing
+### Cross-Protocol Attacks
 
-`isSecurityEvent: true` is set on errors that should go to a security channel, not the ops queue:
+| ID | Attack | Description |
+|----|--------|-------------|
+| ATK-003 | Multi-Protocol Reconnaissance | MAP + Diameter + GTP coordinated attack |
+| ATK-005 | Diameter-to-SS7 Downgrade | Diameter AIR failure then MAP fallback |
+| ATK-009 | Diameter Recon + GTP Hijack | AIR followed by CreateSession |
+| ATK-010 | Diameter Location Hijack | AIR followed by spoofed ULR |
 
-- `tls/cert_revoked` — certificate explicitly revoked by CA
-- `tls/hostname_mismatch` — could indicate man-in-the-middle
+---
 
-## Non-idempotent request protection
+## Architecture
 
-For POST, PUT, PATCH, DELETE, `nfault` sets `requiresIdempotencyCheck: true` even when the transport error would normally be retryable. A lost TCP connection mid-POST could mean the request was processed or not — retrying could cause duplicate charges or double writes. The library surfaces this flag and leaves the retry decision to the application layer.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         SigCorr                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐            │
+│  │   SS7/MAP   │   │  Diameter   │   │   GTPv2-C   │            │
+│  │   Parser    │   │   Parser    │   │   Parser    │            │
+│  └──────┬──────┘   └──────┬──────┘   └──────┬──────┘            │
+│         │                 │                 │                    │
+│         └────────────┬────┴────────────────┘                    │
+│                      ▼                                           │
+│            ┌─────────────────────┐                              │
+│            │  Identity Resolver  │  IMSI ↔ MSISDN correlation   │
+│            └──────────┬──────────┘                              │
+│                       ▼                                          │
+│            ┌─────────────────────┐                              │
+│            │ Correlation Engine  │  Temporal windowing          │
+│            └──────────┬──────────┘                              │
+│                       ▼                                          │
+│            ┌─────────────────────┐                              │
+│            │   Pattern Matcher   │  22 attack signatures        │
+│            └──────────┬──────────┘                              │
+│                       ▼                                          │
+│                   ALERTS                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-## Research basis
+---
 
-The taxonomy behind this library is grounded in research on DNS-over-QUIC downgrade attacks and protocol fallback behavior (Computers & Security, Elsevier, 2026). The cause-confidence model and per-cause retryability flags emerged from classifying real attack-induced error surfaces across five DNS client implementations.
+## Example Output
+
+```
+════════════════════════════════════════════════════════════════
+ SigCorr v0.1.0 - Cross-Protocol Signaling Security Correlator
+════════════════════════════════════════════════════════════════
+
+Analyzing: full_multi_protocol_attack.pcap
+
+Events decoded:
+  SS7/MAP:     2
+  Diameter:    2
+  GTPv2-C:     1
+  Total:       5
+
+Alerts:
+  ALERT[CRITICAL] ATK-001 | Silent Location Tracking 
+    subscriber=IMSI:234101234567890 
+    confidence=95% 
+    events=2
+
+  ALERT[CRITICAL] ATK-003 | Multi-Protocol Reconnaissance 
+    subscriber=IMSI:234101234567890 
+    confidence=90% 
+    cross-protocol=true
+    events=5
+
+Summary: 2 alerts generated
+```
+
+---
+
+## Configuration
+
+Edit `sigcorr-config.yaml`:
+
+```yaml
+sigcorr:
+  tshark:
+    path: /usr/bin/tshark
+    timeout: 30s
+    
+  correlation:
+    temporal_window: 30s
+    inference_window: 10s
+    
+  detection:
+    min_confidence: 70
+    enabled_patterns:
+      - ATK-001
+      - ATK-002
+      - ATK-003
+      # ... or 'all'
+      
+  output:
+    evidence_dir: ./evidence
+    extract_pcap: true
+```
+
+---
+
+## Testing
+
+### Attack Detection Tests
+
+```bash
+./test.sh
+```
+
+Validates 9 attack patterns against generated pcaps.
+
+### Robustness Tests
+
+```bash
+# Download public samples first (see test-pcaps/public-samples/DOWNLOAD_GUIDE.md)
+bash ./test-pcaps/test_public_samples.sh
+```
+
+Tests against 20+ real-world pcap samples for:
+- No crashes on encoding variations
+- No false positives on normal traffic
+
+---
+
+## Project Structure
+
+```
+sigcorr/
+├── src/main/java/io/sigcorr/
+│   ├── core/              # Core models (SignalingEvent, SubscriberIdentity)
+│   ├── ingest/            # Protocol parsers (TsharkBridge)
+│   ├── correlation/       # Identity resolution, temporal windowing
+│   └── detection/         # Attack patterns, alerting
+├── test-pcaps/
+│   ├── attack-samples/    # Generated attack pcaps
+│   ├── public-samples/    # Real-world validation samples
+│   └── generate_*.py      # Pcap generators
+├── evidence/              # Extracted evidence pcaps (runtime)
+├── pom.xml
+├── sigcorr-config.yaml
+└── test.sh
+```
+
+---
 
 ## Roadmap
 
-- **v1.1** — Python port (`pip install nfault`)
-- **v1.2** — QUIC/HTTP3 error classification (DoQ error taxonomy from research)
-- **v1.3** — gRPC status codes, WebSocket close codes
+- [x] v0.1.0 — Pcap-based detection, 22 patterns, cross-protocol correlation
+- [ ] v0.2.0 — Real-time stream processing (Kafka/tap input)
+- [ ] v0.3.0 — Response code analysis, volumetric detection
+- [ ] v1.0.0 — Production-ready with enterprise features
 
-## Contributing
+---
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). New error types must be proposed in the taxonomy spec first — see [docs/taxonomy.md](./docs/taxonomy.md).
+## References
+
+- [GSMA FS.11](https://www.gsma.com/security/resources/fs-11-ss7-interconnect-security-monitoring-guidelines/) — SS7 Security Monitoring Guidelines
+- [GSMA FS.19](https://www.gsma.com/security/resources/fs-19-diameter-interconnect-security/) — Diameter Interconnect Security
+- [3GPP TS 29.002](https://www.3gpp.org/DynaReport/29002.htm) — MAP Protocol Specification
+- [3GPP TS 29.272](https://www.3gpp.org/DynaReport/29272.htm) — Diameter S6a/S6d Interface
+
+---
 
 ## License
 
-MIT
+AGPL-3.0 — See [LICENSE](LICENSE) for details.
+
+---
+
+## Author
+
+**Xyzzz** (GitHub: [@sage-s11](https://github.com/sage-s11))
+
+Security researcher specializing in DNS/DDI protocols and telecom signaling security.
+
+---
+
+## Acknowledgments
+
+- Wireshark project for tshark and protocol dissectors
+- P1 Security for SS7 security research and inspiration
+- The telecom security research community
