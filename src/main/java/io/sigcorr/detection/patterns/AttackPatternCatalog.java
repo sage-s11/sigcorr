@@ -34,11 +34,12 @@ public final class AttackPatternCatalog {
                 .patternId("ATK-009")
                 .name("Diameter Recon + GTP Session Hijack")
                 .description("Diameter Authentication-Information-Request probes subscriber, "
-                        + "followed by GTP-C Create-Session-Request for the same IMSI. "
-                        + "Cross-protocol reconnaissance leading to session establishment.")
+                        + "followed by GTP-C Create-Session-Request for the same IMSI from the same source. "
+                        + "Cross-protocol reconnaissance leading to session establishment. "
+                        + "Note: Normal LTE attach also uses AIR+CreateSession but from legitimate MME/SGW pairs.")
                 .severity(AttackPattern.Severity.CRITICAL)
-                .maxWindow(Duration.ofMinutes(5))
-                .requireSameSource(false)
+                .maxWindow(Duration.ofSeconds(30)) // Tighter window - attacks typically fast
+                .requireSameSource(true) // CHANGED: require same source to reduce FP on normal attach
                 .mitreTechniques(Set.of("T1430", "T1565"))
                 .addStep(1, SignalingOperation.DIA_AUTH_INFO_REQUEST)
                 .addStep(2, SignalingOperation.GTP_CREATE_SESSION_REQUEST)
@@ -81,8 +82,340 @@ public final class AttackPatternCatalog {
                 callInterceptionViaForwarding(),
                 crossProtocolReconnaissance(),
                 diameterReconWithSession(),
-                diameterLocationHijack()
+                diameterLocationHijack(),
+                // New patterns
+                smsInterception(),
+                smsRoutingHijack(),
+                locationTrackingViaSms(),
+                authVectorHarvesting(),
+                subscriberProfileTampering(),
+                massLocationTracking(),
+                gtpSessionHijack(),
+                diameterDoS(),
+                ssCodeInterrogation(),
+                ussdPhishing(),
+                imsiCatcherDetection(),
+                crossProtocolDoS()
         );
+    }
+
+    /**
+     * ATTACK 11: SMS Interception Setup
+     *
+     * Attacker queries SMS routing then forwards SMS to interception point.
+     * Step 1: SendRoutingInfoForSM reveals SMS-C routing
+     * Step 2: MT-ForwardSM intercepts the SMS
+     *
+     * GSMA category: SMS Interception
+     * MITRE: T1636 (Adversary-in-the-Middle)
+     */
+    public static AttackPattern smsInterception() {
+        return AttackPattern.builder()
+                .patternId("ATK-011")
+                .name("SMS Interception")
+                .description("Attacker queries SMS routing information then intercepts SMS. " +
+                        "SendRoutingInfoForSM reveals the SMS-C and routing path, " +
+                        "MT-ForwardSM is then used to deliver SMS through attacker's node.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1636", "T1040"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO_FOR_SM)
+                .addStep(2, SignalingOperation.MAP_MT_FORWARD_SM)
+                .build();
+    }
+
+    /**
+     * ATTACK 12: SMS Routing Hijack
+     *
+     * Attacker modifies SMS routing to redirect all SMS through their node.
+     * Step 1: SendRoutingInfoForSM to discover current routing
+     * Step 2: InsertSubscriberData to change SMS-C address
+     *
+     * GSMA category: SMS Interception
+     */
+    public static AttackPattern smsRoutingHijack() {
+        return AttackPattern.builder()
+                .patternId("ATK-012")
+                .name("SMS Routing Hijack")
+                .description("Attacker modifies subscriber SMS routing in HLR. " +
+                        "SendRoutingInfoForSM reveals current routing, InsertSubscriberData " +
+                        "changes the SMS-C address to attacker's node.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1636"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO_FOR_SM)
+                .addStep(2, SignalingOperation.MAP_INSERT_SUBSCRIBER_DATA)
+                .build();
+    }
+
+    /**
+     * ATTACK 13: Location Tracking via SMS Trigger
+     *
+     * Attacker triggers subscriber location update via SMS delivery notification.
+     * Step 1: SendRoutingInfoForSM probes subscriber
+     * Step 2: ProvideSubscriberInfo or ProvideSubscriberLocation reveals location
+     *
+     * Silent SMS (Type 0) variant is common for tracking without user awareness.
+     *
+     * GSMA category: Location Tracking
+     */
+    public static AttackPattern locationTrackingViaSms() {
+        return AttackPattern.builder()
+                .patternId("ATK-013")
+                .name("Location Tracking via SMS")
+                .description("Attacker uses SMS routing query as a trigger for location tracking. " +
+                        "SendRoutingInfoForSM forces network to locate subscriber, " +
+                        "followed by ProvideSubscriberInfo to extract Cell-ID.")
+                .severity(AttackPattern.Severity.HIGH)
+                .maxWindow(Duration.ofSeconds(60))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1430"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO_FOR_SM)
+                .addStep(2, SignalingOperation.MAP_PROVIDE_SUBSCRIBER_INFO)
+                .build();
+    }
+
+    /**
+     * ATTACK 14: Authentication Vector Harvesting
+     *
+     * Attacker extracts authentication triplets/quintets for later impersonation.
+     * Step 1: SendRoutingInfo to identify subscriber
+     * Step 2: SendAuthenticationInfo to get auth vectors
+     *
+     * With auth vectors, attacker can clone SIM or perform active interception.
+     *
+     * GSMA category: Authentication Attack
+     */
+    public static AttackPattern authVectorHarvesting() {
+        return AttackPattern.builder()
+                .patternId("ATK-014")
+                .name("Authentication Vector Harvesting")
+                .description("Attacker queries routing then extracts authentication vectors. " +
+                        "SendRoutingInfo identifies the subscriber, SendAuthenticationInfo " +
+                        "retrieves triplets/quintets enabling SIM cloning or interception.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1528", "T1556"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO)
+                .addStep(2, SignalingOperation.MAP_SEND_AUTH_INFO)
+                .build();
+    }
+
+    /**
+     * ATTACK 15: Subscriber Profile Tampering
+     *
+     * Attacker modifies subscriber profile to enable interception or DoS.
+     * Step 1: SendRoutingInfo to identify subscriber
+     * Step 2: InsertSubscriberData to modify profile
+     * Step 3: Optional CancelLocation to force re-registration with new profile
+     *
+     * GSMA category: Subscriber Manipulation
+     */
+    public static AttackPattern subscriberProfileTampering() {
+        return AttackPattern.builder()
+                .patternId("ATK-015")
+                .name("Subscriber Profile Tampering")
+                .description("Attacker modifies subscriber profile in HLR. " +
+                        "SendRoutingInfo identifies subscriber and serving nodes, " +
+                        "InsertSubscriberData modifies the profile, CancelLocation " +
+                        "forces re-registration with tampered profile.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(3))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1565"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO)
+                .addStep(2, SignalingOperation.MAP_INSERT_SUBSCRIBER_DATA)
+                .addStep(3, SignalingOperation.MAP_CANCEL_LOCATION, false)
+                .build();
+    }
+
+    /**
+     * ATTACK 16: Mass Location Tracking (Location ping sweep)
+     *
+     * Attacker sends location queries for same subscriber from multiple operations.
+     * Step 1: SendRoutingInfo reveals routing
+     * Step 2: SendRoutingInfoForGprs reveals packet routing
+     * Step 3: ProvideSubscriberInfo reveals location
+     *
+     * Indicates persistent surveillance of a target.
+     *
+     * GSMA category: Persistent Tracking
+     */
+    public static AttackPattern massLocationTracking() {
+        return AttackPattern.builder()
+                .patternId("ATK-016")
+                .name("Persistent Location Tracking")
+                .description("Attacker performs comprehensive location tracking using multiple " +
+                        "operations. SendRoutingInfo, SendRoutingInfoForGprs, and " +
+                        "ProvideSubscriberInfo combine to build complete location picture.")
+                .severity(AttackPattern.Severity.HIGH)
+                .maxWindow(Duration.ofMinutes(5))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1430"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO)
+                .addStep(2, SignalingOperation.MAP_SEND_ROUTING_INFO_GPRS)
+                .addStep(3, SignalingOperation.MAP_PROVIDE_SUBSCRIBER_INFO)
+                .build();
+    }
+
+    /**
+     * ATTACK 17: GTP Session Hijack
+     *
+     * Attacker creates/modifies GTP session to intercept data traffic.
+     * Step 1: CreateSessionRequest establishes tunnel
+     * Step 2: ModifyBearerRequest redirects traffic
+     *
+     * Cross-interface variant includes prior SS7 reconnaissance.
+     *
+     * GSMA category: Data Interception
+     */
+    public static AttackPattern gtpSessionHijack() {
+        return AttackPattern.builder()
+                .patternId("ATK-017")
+                .name("GTP Session Hijack")
+                .description("Attacker establishes and modifies GTP session to intercept data. " +
+                        "CreateSessionRequest establishes the tunnel, ModifyBearerRequest " +
+                        "redirects traffic through attacker's node.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1557", "T1040"))
+                .addStep(1, SignalingOperation.GTP_CREATE_SESSION_REQUEST)
+                .addStep(2, SignalingOperation.GTP_MODIFY_BEARER_REQUEST)
+                .build();
+    }
+
+    /**
+     * ATTACK 18: Diameter Denial of Service
+     *
+     * Attacker cancels subscriber location and deletes data via Diameter.
+     * Step 1: CancelLocationRequest removes subscriber from MME
+     * Step 2: DeleteSubscriberDataRequest removes profile
+     *
+     * GSMA category: Denial of Service
+     */
+    public static AttackPattern diameterDoS() {
+        return AttackPattern.builder()
+                .patternId("ATK-018")
+                .name("Diameter Denial of Service")
+                .description("Attacker causes service denial via Diameter S6a interface. " +
+                        "CancelLocationRequest deregisters subscriber from serving MME, " +
+                        "DeleteSubscriberDataRequest removes profile data.")
+                .severity(AttackPattern.Severity.HIGH)
+                .maxWindow(Duration.ofSeconds(60))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1499"))
+                .addStep(1, SignalingOperation.DIA_CANCEL_LOCATION_REQUEST)
+                .addStep(2, SignalingOperation.DIA_DELETE_SUBSCRIBER_DATA_REQUEST)
+                .build();
+    }
+
+    /**
+     * ATTACK 19: Supplementary Service Interrogation
+     *
+     * Attacker probes subscriber's supplementary service configuration.
+     * Step 1: InterrogateSS reveals forwarding/barring settings
+     * Step 2: RegisterSS or ActivateSS modifies settings
+     *
+     * GSMA category: Reconnaissance + Manipulation
+     */
+    public static AttackPattern ssCodeInterrogation() {
+        return AttackPattern.builder()
+                .patternId("ATK-019")
+                .name("Supplementary Service Probing")
+                .description("Attacker interrogates and modifies supplementary services. " +
+                        "InterrogateSS reveals current forwarding/barring configuration, " +
+                        "followed by RegisterSS to modify settings.")
+                .severity(AttackPattern.Severity.MEDIUM)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1592"))
+                .addStep(1, SignalingOperation.MAP_INTERROGATE_SS)
+                .addStep(2, SignalingOperation.MAP_REGISTER_SS)
+                .build();
+    }
+
+    /**
+     * ATTACK 20: USSD Phishing Setup
+     *
+     * Attacker uses USSD to display fake messages or extract information.
+     * Step 1: SendRoutingInfo identifies subscriber
+     * Step 2: ProcessUnstructuredSS sends phishing USSD
+     *
+     * GSMA category: Social Engineering
+     */
+    public static AttackPattern ussdPhishing() {
+        return AttackPattern.builder()
+                .patternId("ATK-020")
+                .name("USSD Phishing")
+                .description("Attacker sends malicious USSD messages to subscriber. " +
+                        "SendRoutingInfo identifies the subscriber and serving node, " +
+                        "ProcessUnstructuredSS delivers the phishing message.")
+                .severity(AttackPattern.Severity.MEDIUM)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1566"))
+                .addStep(1, SignalingOperation.MAP_SEND_ROUTING_INFO)
+                .addStep(2, SignalingOperation.MAP_PROCESS_UNSTRUCTURED_SS)
+                .build();
+    }
+
+    /**
+     * ATTACK 21: IMSI Catcher Detection Pattern
+     *
+     * Detects potential IMSI catcher activity: UpdateLocation from foreign node
+     * followed by AuthenticationInfo request for same subscriber.
+     *
+     * When seen from unusual source, indicates active interception device.
+     *
+     * GSMA category: Active Interception
+     */
+    public static AttackPattern imsiCatcherDetection() {
+        return AttackPattern.builder()
+                .patternId("ATK-021")
+                .name("IMSI Catcher Activity")
+                .description("Detects potential IMSI catcher / fake base station. " +
+                        "UpdateLocation re-registers subscriber to unknown node, " +
+                        "followed by SendAuthenticationInfo to obtain auth vectors. " +
+                        "This pattern indicates active interception equipment.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofSeconds(30))
+                .requireSameSource(true)
+                .mitreTechniques(Set.of("T1637", "T1556"))
+                .addStep(1, SignalingOperation.MAP_UPDATE_LOCATION)
+                .addStep(2, SignalingOperation.MAP_SEND_AUTH_INFO)
+                .build();
+    }
+
+    /**
+     * ATTACK 22: Cross-Protocol Denial of Service
+     *
+     * Attacker uses both SS7 and Diameter to cause maximum service disruption.
+     * Step 1: MAP CancelLocation removes subscriber from VLR
+     * Step 2: Diameter CancelLocation removes from MME
+     *
+     * Subscriber loses service on both 2G/3G and 4G networks.
+     *
+     * GSMA category: Cross-Protocol DoS
+     */
+    public static AttackPattern crossProtocolDoS() {
+        return AttackPattern.builder()
+                .patternId("ATK-022")
+                .name("Cross-Protocol Denial of Service")
+                .description("Attacker causes comprehensive service denial across protocols. " +
+                        "MAP CancelLocation deregisters from VLR (2G/3G), " +
+                        "Diameter CancelLocation deregisters from MME (4G). " +
+                        "Subscriber loses all network connectivity.")
+                .severity(AttackPattern.Severity.CRITICAL)
+                .maxWindow(Duration.ofMinutes(2))
+                .requireSameSource(false)
+                .mitreTechniques(Set.of("T1499"))
+                .addStep(1, SignalingOperation.MAP_CANCEL_LOCATION)
+                .addStep(2, SignalingOperation.DIA_CANCEL_LOCATION_REQUEST)
+                .build();
     }
 
     /**

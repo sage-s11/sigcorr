@@ -95,17 +95,24 @@ public class TsharkBridge {
      */
     private List<SignalingEvent> decodeMapEvents(Path pcapFile) throws IOException, InterruptedException {
         // tshark fields for MAP
+        // Note: field names use dots, tshark EK output uses underscores (e.g., e164.msisdn -> e164_msisdn)
         String[] fields = {
                 "-e", "frame.time_epoch",
                 "-e", "gsm_old.opCode",
-                "-e", "gsm_map.imsi",
-                "-e", "gsm_map.msisdn",
                 "-e", "gsm_old.localValue",
-                "-e", "e164.called_party_number.digits",
-                "-e", "e212.imsi",
-                "-e", "sccp.calling.digits",
-                "-e", "sccp.called.digits",
-                "-e", "gsm_map.ch.msisdn",
+                "-e", "e212.imsi",           // IMSI in E.212 format
+                "-e", "e164.msisdn",         // MSISDN in E.164 format (key field!)
+                "-e", "gsm_map.msisdn",      // Alternative MSISDN field
+                "-e", "gsm_map.ch.msisdn",   // Call Handling MSISDN
+                "-e", "sccp.calling.digits", // Source Global Title
+                "-e", "sccp.called.digits",  // Destination Global Title
+                // TCAP transaction IDs for session tracking
+                "-e", "tcap.otid",           // Originating Transaction ID
+                "-e", "tcap.dtid",           // Destination Transaction ID
+                // Component type detection (invoke vs returnResult)
+                "-e", "gsm_old.invokeID",
+                "-e", "gsm_old.invoke_element",        // Indicates invoke component
+                "-e", "gsm_old.returnResultLast_element", // Indicates returnResult
         };
 
         String filter = "gsm_map || camel";
@@ -175,6 +182,9 @@ public class TsharkBridge {
                 "-e", "e212.imsi",
                 "-e", "ip.src",
                 "-e", "ip.dst",
+                // Session tracking fields
+                "-e", "gtpv2.seq",           // Sequence number for request/response correlation
+                "-e", "gtpv2.teid",          // Tunnel Endpoint ID
         };
 
         String filter = "gtpv2";
@@ -271,32 +281,48 @@ public class TsharkBridge {
             return null;
         }
 
-        // Extract subscriber identity
-        String imsi = extractString(layers, "e212_imsi", "gsm_map_ch_imsi", "gsm_map_sm_imsi", "e212_imsi");
-        String msisdn = extractString(layers, "gsm_map_msisdn", "e164_msisdn", "gsm_map_sm_msisdn", "e164_called_party_number_digits");
-
-        SubscriberIdentity subscriber = buildIdentity(imsi, msisdn);
-
+        // Extract subscriber identity - prioritize target MSISDN/IMSI over network addresses
+        // Note: tshark EK format converts dots to underscores (e.g., e164.msisdn -> e164_msisdn)
+        String imsi = extractString(layers, "e212_imsi");
+        String msisdn = extractString(layers, "e164_msisdn", "gsm_map_msisdn", "gsm_map_ch_msisdn");
+        
         // Network nodes from SCCP addresses
         String callingGt = extractString(layers, "sccp_calling_digits");
         String calledGt = extractString(layers, "sccp_called_digits");
-
-        // Fallback: use SCCP GT as subscriber when no IMSI/MSISDN
-        if (subscriber == null) {
-            String attackerGt = null;
-            if (callingGt != null && callingGt.startsWith("49")) {
-                attackerGt = callingGt;
-            } else if (calledGt != null && calledGt.startsWith("49")) {
-                attackerGt = calledGt;
-            } else {
-                attackerGt = callingGt != null ? callingGt : calledGt;
-            }
-            if (attackerGt != null) {
-                subscriber = SubscriberIdentity.fromMsisdn(attackerGt);
-            }
+        
+        // TCAP transaction ID for session tracking
+        // Use OTID for requests (initiator), DTID for responses (responder)
+        String otid = extractString(layers, "tcap_otid");
+        String dtid = extractString(layers, "tcap_dtid");
+        String sessionId = otid != null ? "TCAP:" + otid : (dtid != null ? "TCAP:" + dtid : null);
+        
+        // Determine message type (invoke = request, returnResult = response)
+        SignalingEvent.MessageType messageType = SignalingEvent.MessageType.UNKNOWN;
+        String invokeField = extractString(layers, "gsm_old_invoke_element");
+        String returnResultField = extractString(layers, "gsm_old_returnResultLast_element");
+        if (invokeField != null) {
+            messageType = SignalingEvent.MessageType.REQUEST;
+        } else if (returnResultField != null) {
+            messageType = SignalingEvent.MessageType.RESPONSE;
         }
+        
+        // For MAP operations, the MSISDN in the message payload is the TARGET (victim),
+        // NOT the source. The SCCP calling GT is the querying node (potential attacker).
+        // We must NEVER use the calling GT as the subscriber identity - that would
+        // correlate the attacker's identity with the victim's events.
+        //
+        // If we have no IMSI/MSISDN in the payload, this event cannot be correlated
+        // to a subscriber. We should still process it for network-level analysis
+        // but not attribute it to a fake "subscriber".
+        
+        SubscriberIdentity subscriber = buildIdentity(imsi, msisdn);
+        
         if (subscriber == null) {
-            log.debug("Skipping MAP event with no subscriber identity");
+            // No subscriber identity - log and skip
+            // Previously we used callingGt as fallback, but that's semantically wrong:
+            // it correlates attacker's GT as if it were the victim's MSISDN
+            log.debug("MAP {} event has no IMSI/MSISDN in payload, skipping subscriber correlation", 
+                    operation.getDisplayName());
             return null;
         }
 
@@ -304,6 +330,12 @@ public class TsharkBridge {
         params.put("operationCode", String.valueOf(opcode));
         if (imsi != null) params.put("imsi", imsi);
         if (msisdn != null) params.put("msisdn", msisdn);
+        // Store GTs in params for analysis (foreign GT detection)
+        if (callingGt != null) params.put("callingGt", callingGt);
+        if (calledGt != null) params.put("calledGt", calledGt);
+        // Store TCAP transaction IDs
+        if (otid != null) params.put("tcapOtid", otid);
+        if (dtid != null) params.put("tcapDtid", dtid);
 
         var builder = SignalingEvent.builder()
                 .timestamp(timestamp)
@@ -311,7 +343,9 @@ public class TsharkBridge {
                 .operation(operation)
                 .subscriber(subscriber)
                 .parameters(params)
-                .direction(SignalingEvent.Direction.INBOUND);
+                .direction(SignalingEvent.Direction.INBOUND)
+                .messageType(messageType)
+                .sessionId(sessionId);
 
         if (callingGt != null) builder.sourceNode(NetworkNode.fromGlobalTitle(callingGt));
         if (calledGt != null) builder.destinationNode(NetworkNode.fromGlobalTitle(calledGt));
@@ -327,7 +361,8 @@ public class TsharkBridge {
         if (commandCode < 0) return null;
 
         String requestFlag = extractString(layers, "diameter_flags_request");
-        boolean isRequest = "1".equals(requestFlag);
+        // EK JSON may return "true"/"false" or "1"/"0" depending on tshark version
+        boolean isRequest = "1".equals(requestFlag) || "true".equalsIgnoreCase(requestFlag);
 
         SignalingOperation operation = SignalingOperation.fromDiameterCommand(commandCode, isRequest);
         if (operation == null) return null;
@@ -347,13 +382,32 @@ public class TsharkBridge {
         String originRealm = extractString(layers, "diameter_Origin-Realm");
         String destHost = extractString(layers, "diameter_Destination-Host");
         String destRealm = extractString(layers, "diameter_Destination-Realm");
-        String sessionId = extractString(layers, "diameter_Session-Id");
+        String diameterSessionId = extractString(layers, "diameter_Session-Id");
         String resultCode = extractString(layers, "diameter_Result-Code");
 
         if (originHost != null) params.put("originHost", originHost);
         if (originRealm != null) params.put("originRealm", originRealm);
-        if (sessionId != null) params.put("sessionId", sessionId);
+        if (diameterSessionId != null) params.put("sessionId", diameterSessionId);
         if (resultCode != null) params.put("resultCode", resultCode);
+        
+        // Session ID for correlation (Diameter Session-Id is the standard correlation key)
+        String sessionId = diameterSessionId != null ? "DIA:" + diameterSessionId : null;
+        
+        // Message type based on request flag
+        SignalingEvent.MessageType messageType = isRequest 
+                ? SignalingEvent.MessageType.REQUEST 
+                : SignalingEvent.MessageType.RESPONSE;
+        
+        // Check for error response
+        if (!isRequest && resultCode != null) {
+            try {
+                int code = Integer.parseInt(resultCode);
+                // Diameter result codes: 2xxx = success, 3xxx = protocol error, 4xxx = transient, 5xxx = permanent
+                if (code >= 3000) {
+                    messageType = SignalingEvent.MessageType.ERROR;
+                }
+            } catch (NumberFormatException ignored) {}
+        }
 
         var builder = SignalingEvent.builder()
                 .timestamp(timestamp)
@@ -361,7 +415,9 @@ public class TsharkBridge {
                 .operation(operation)
                 .subscriber(subscriber)
                 .parameters(params)
-                .direction(isRequest ? SignalingEvent.Direction.INBOUND : SignalingEvent.Direction.OUTBOUND);
+                .direction(isRequest ? SignalingEvent.Direction.INBOUND : SignalingEvent.Direction.OUTBOUND)
+                .messageType(messageType)
+                .sessionId(sessionId);
 
         if (originHost != null) builder.sourceNode(NetworkNode.fromDiameterHost(originHost, originRealm));
         if (destHost != null) builder.destinationNode(NetworkNode.fromDiameterHost(destHost, destRealm));
@@ -373,10 +429,10 @@ public class TsharkBridge {
         Instant timestamp = extractTimestamp(layers);
         if (timestamp == null) return null;
 
-        int messageType = extractInt(layers, "gtpv2_message_type");
-        if (messageType < 0) return null;
+        int gtpMessageType = extractInt(layers, "gtpv2_message_type");
+        if (gtpMessageType < 0) return null;
 
-        SignalingOperation operation = SignalingOperation.fromGtpMessageType(messageType);
+        SignalingOperation operation = SignalingOperation.fromGtpMessageType(gtpMessageType);
         if (operation == null) return null;
 
         String imsi = extractString(layers, "e212_imsi");
@@ -385,7 +441,7 @@ public class TsharkBridge {
         SubscriberIdentity subscriber = buildIdentity(imsi, msisdn);
 
         Map<String, String> params = new HashMap<>();
-        params.put("messageType", String.valueOf(messageType));
+        params.put("messageType", String.valueOf(gtpMessageType));
         if (imsi != null) params.put("imsi", imsi);
         if (msisdn != null) params.put("msisdn", msisdn);
 
@@ -393,9 +449,33 @@ public class TsharkBridge {
         String ratType = extractString(layers, "gtpv2_rat_type");
         String fteidIp = extractString(layers, "gtpv2_f_teid_ipv4");
         String srcIp = extractString(layers, "ip_src");
+        String seqNum = extractString(layers, "gtpv2_seq");  // Sequence number for correlation
+        String teid = extractString(layers, "gtpv2_teid");   // TEID for session correlation
 
         if (apn != null) params.put("apn", apn);
         if (ratType != null) params.put("ratType", ratType);
+        if (teid != null) params.put("teid", teid);
+        if (seqNum != null) params.put("seqNum", seqNum);
+        
+        // Session ID: use TEID if available, otherwise sequence number
+        String sessionId = null;
+        if (teid != null && !teid.equals("0")) {
+            sessionId = "GTP:" + teid;
+        } else if (seqNum != null) {
+            sessionId = "GTP-SEQ:" + seqNum;
+        }
+        
+        // GTP-C message types: requests are usually odd, responses are even
+        // But safer to check specific message types
+        // 32=CreateSession Request, 33=CreateSession Response, 34=ModifyBearer Request, etc.
+        SignalingEvent.MessageType messageType;
+        switch (gtpMessageType) {
+            case 32, 34, 36, 38, 40, 64, 66, 68, 170 -> messageType = SignalingEvent.MessageType.REQUEST;
+            case 33, 35, 37, 39, 41, 65, 67, 69, 171 -> messageType = SignalingEvent.MessageType.RESPONSE;
+            default -> messageType = (gtpMessageType % 2 == 0) 
+                    ? SignalingEvent.MessageType.RESPONSE 
+                    : SignalingEvent.MessageType.REQUEST;
+        }
 
         var builder = SignalingEvent.builder()
                 .timestamp(timestamp)
@@ -403,7 +483,9 @@ public class TsharkBridge {
                 .operation(operation)
                 .subscriber(subscriber)
                 .parameters(params)
-                .direction(SignalingEvent.Direction.INBOUND);
+                .direction(SignalingEvent.Direction.INBOUND)
+                .messageType(messageType)
+                .sessionId(sessionId);
 
         if (fteidIp != null) builder.sourceNode(NetworkNode.fromGtpPeer(fteidIp));
         else if (srcIp != null) builder.sourceNode(NetworkNode.fromGtpPeer(srcIp));
@@ -438,12 +520,37 @@ public class TsharkBridge {
      */
     private String extractString(JsonObject layers, String... fieldNames) {
         for (String field : fieldNames) {
-            // Try exact name
+            // Try exact name at top level
             JsonElement el = layers.get(field);
             if (el == null) {
                 // Try with dots replaced by underscores (EK format)
                 el = layers.get(field.replace(".", "_").replace("-", "_"));
             }
+            
+            // EK JSON nests fields under protocol name, e.g.:
+            //   "diameter": { "diameter_diameter_cmd_code": "316" }
+            //   "gsm_map": { "gsm_old_localValue": "22" }
+            //   "e212": { "e212_e212_imsi": "234..." }
+            // Try looking inside protocol-specific objects
+            if (el == null) {
+                String underscoredField = field.replace(".", "_").replace("-", "_");
+                
+                // Try common protocol prefixes
+                for (String proto : new String[]{"diameter", "gsm_map", "tcap", "sccp", "e212", "e164", "m3ua", "gtpv2"}) {
+                    JsonElement protoObj = layers.get(proto);
+                    if (protoObj != null && protoObj.isJsonObject()) {
+                        JsonObject protoLayers = protoObj.getAsJsonObject();
+                        // Try: proto_field (e.g., diameter_cmd_code -> diameter_diameter_cmd_code)
+                        el = protoLayers.get(proto + "_" + underscoredField);
+                        if (el == null) {
+                            // Try exact field name within protocol object
+                            el = protoLayers.get(underscoredField);
+                        }
+                        if (el != null) break;
+                    }
+                }
+            }
+            
             if (el == null) continue;
 
             if (el.isJsonArray()) {
@@ -452,6 +559,10 @@ public class TsharkBridge {
             } else if (el.isJsonPrimitive()) {
                 String val = el.getAsString().trim();
                 if (!val.isEmpty()) return val;
+            } else if (el.isJsonObject()) {
+                // Some fields might be objects with a single value
+                // Skip these for now
+                continue;
             }
         }
         return null;

@@ -22,7 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * Orchestrates the full pipeline:
  * 1. Receives normalized SignalingEvents from protocol decoders
- * 2. Resolves subscriber identity (IMSI ↔ MSISDN mapping)
+ * 2. Resolves subscriber identity (IMSI <-> MSISDN mapping)
  * 3. Places events into the temporal correlation window
  * 4. Runs pattern matching against all known attack patterns
  * 5. Emits SecurityAlerts for confirmed matches
@@ -55,7 +55,7 @@ public class CorrelationEngine {
         List<AttackPattern> patterns = config.getCustomPatterns() != null
                 ? config.getCustomPatterns()
                 : AttackPatternCatalog.getAllPatterns();
-        this.patternMatcher = new PatternMatcher(patterns);
+        this.patternMatcher = new PatternMatcher(patterns, config.getWhitelist());
         this.alerts = new CopyOnWriteArrayList<>();
     }
 
@@ -79,16 +79,13 @@ public class CorrelationEngine {
         String ifaceName = event.getProtocolInterface().getDisplayName();
         eventsByInterface.merge(ifaceName, 1L, Long::sum);
 
-        // Step 1: Learn identity mappings from signaling
-        // Capture the mapping count before learning to detect new mappings
-        int mappingsBefore = identityResolver.getMappingCount();
-        learnIdentityMappings(event);
-        boolean newMappingLearned = identityResolver.getMappingCount() > mappingsBefore;
+        // Step 1: Learn identity mappings from signaling (including temporal inference)
+        boolean newMappingLearned = learnIdentityMappings(event);
 
         // Step 2: Resolve correlation key
         String correlationKey = identityResolver.getCorrelationKey(event.getSubscriber());
 
-        // Step 2b: If we learned a new IMSI↔MSISDN mapping, re-index events
+        // Step 2b: If we learned a new IMSI<->MSISDN mapping, re-index events
         // that were previously stored under the MSISDN key to the IMSI key.
         // This is critical: SRI request is indexed by MSISDN, SRI response reveals
         // the IMSI, and PSI uses the IMSI. Without re-indexing, the SRI request
@@ -125,11 +122,20 @@ public class CorrelationEngine {
      * bucket and never correlate with later events that use the IMSI.
      */
     private void reindexEventsForMapping(SignalingEvent triggeringEvent, String canonicalKey) {
+        // Get IMSI and MSISDN from the triggering event and/or identity resolver
         String msisdn = triggeringEvent.getParameter("msisdn");
         String imsi = triggeringEvent.getParameter("imsi");
+        
+        // Also check subscriber identity
+        if (msisdn == null && triggeringEvent.getSubscriber().hasMsisdn()) {
+            msisdn = triggeringEvent.getSubscriber().getMsisdn().orElse(null);
+        }
+        if (imsi == null && triggeringEvent.getSubscriber().hasImsi()) {
+            imsi = triggeringEvent.getSubscriber().getImsi().orElse(null);
+        }
 
         // Build list of alternative keys that might hold orphaned events
-        List<String> altKeys = new ArrayList<>();
+        Set<String> altKeys = new HashSet<>();
         if (msisdn != null) altKeys.add("MSISDN:" + msisdn);
         if (imsi != null) altKeys.add("IMSI:" + imsi);
 
@@ -141,14 +147,15 @@ public class CorrelationEngine {
             identityResolver.lookupMsisdn(imsi).ifPresent(m -> altKeys.add("MSISDN:" + m));
         }
 
+        // Remove canonical key from alternatives (we're moving TO this key)
+        altKeys.remove(canonicalKey);
+
+        // Move events from alternative keys to canonical key
         for (String altKey : altKeys) {
-            if (!altKey.equals(canonicalKey)) {
-                List<SignalingEvent> oldEvents = temporalWindow.getAllEvents(altKey);
-                if (!oldEvents.isEmpty()) {
-                    log.debug("Re-indexing {} events from {} to {}", oldEvents.size(), altKey, canonicalKey);
-                    for (SignalingEvent oldEvent : oldEvents) {
-                        temporalWindow.addEvent(canonicalKey, oldEvent);
-                    }
+            if (temporalWindow.hasKey(altKey)) {
+                int moved = temporalWindow.moveEvents(altKey, canonicalKey);
+                if (moved > 0) {
+                    log.debug("Re-indexed {} events from {} to {}", moved, altKey, canonicalKey);
                 }
             }
         }
@@ -176,31 +183,55 @@ public class CorrelationEngine {
     }
 
     /**
-     * Learn IMSI ↔ MSISDN mappings from observed signaling.
+     * Learn IMSI <-> MSISDN mappings from observed signaling.
      *
      * Key learning opportunities:
      * - MAP SendRoutingInfo: request has MSISDN, response has IMSI
      * - MAP UpdateLocation: has IMSI
      * - GTP-C Create-Session: may have both IMSI and MSISDN
      * - Diameter S6a: User-Name contains IMSI
+     *
+     * TEMPORAL INFERENCE: When an event has only IMSI or only MSISDN,
+     * we attempt to infer the mapping by looking for a recent event
+     * with the complementary identifier from the same source node.
+     * This handles attack chains like: MAP SRI (MSISDN) -> MAP PSI (IMSI)
+     * where both target the same subscriber but neither event has both IDs.
+     *
+     * @return true if a new mapping was learned or inferred
      */
-    private void learnIdentityMappings(SignalingEvent event) {
+    private boolean learnIdentityMappings(SignalingEvent event) {
+        // Get IMSI/MSISDN from parameters map
         String imsi = event.getParameter("imsi");
         String msisdn = event.getParameter("msisdn");
-
-        if (imsi != null && msisdn != null) {
-            identityResolver.registerMapping(imsi, msisdn);
-            log.debug("Learned identity mapping: IMSI={} ↔ MSISDN={} from {}",
-                    imsi, msisdn, event.getOperation().getDisplayName());
+        
+        // Also check the subscriber identity itself (TsharkBridge stores identifiers there too)
+        SubscriberIdentity subscriber = event.getSubscriber();
+        if (imsi == null && subscriber.hasImsi()) {
+            imsi = subscriber.getImsi().orElse(null);
+        }
+        if (msisdn == null && subscriber.hasMsisdn()) {
+            msisdn = subscriber.getMsisdn().orElse(null);
         }
 
-        // Also update subscriber identity with resolved info
-        if (imsi != null && event.getSubscriber().hasMsisdn() && !event.getSubscriber().hasImsi()) {
-            String existingMsisdn = event.getSubscriber().getMsisdn().orElse(null);
-            if (existingMsisdn != null) {
-                identityResolver.registerMapping(imsi, existingMsisdn);
-            }
+        // Get source node for temporal inference grouping
+        String sourceNode = null;
+        if (event.getSourceNode() != null) {
+            sourceNode = event.getSourceNode().getIdentifier();
         }
+
+        // Try temporal inference — this handles all cases:
+        // 1. Both present -> direct registration
+        // 2. Only IMSI -> check for pending MSISDN, or store as pending
+        // 3. Only MSISDN -> check for pending IMSI, or store as pending
+        boolean newMapping = identityResolver.tryTemporalInference(
+                imsi, msisdn, event.getTimestamp(), sourceNode);
+
+        if (newMapping) {
+            log.debug("Learned identity mapping from {}: IMSI={}, MSISDN={}",
+                    event.getOperation().getDisplayName(), imsi, msisdn);
+        }
+
+        return newMapping;
     }
 
     /**

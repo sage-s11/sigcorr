@@ -63,6 +63,54 @@ public enum SignalingOperation {
     MAP_PROCESS_UNSTRUCTURED_SS(ProtocolInterface.SS7_MAP, 73,
             "ProcessUnstructuredSS-Request", OperationCategory.RECONNAISSANCE),
 
+    /** MAP opcode 46 - Sends SMS via signaling (MT-ForwardSM) */
+    MAP_MT_FORWARD_SM(ProtocolInterface.SS7_MAP, 46,
+            "MT-ForwardSM", OperationCategory.INTERCEPTION),
+
+    /** MAP opcode 45 - Sends SMS via signaling (MO-ForwardSM) */
+    MAP_MO_FORWARD_SM(ProtocolInterface.SS7_MAP, 45,
+            "MO-ForwardSM", OperationCategory.INTERCEPTION),
+
+    /** MAP opcode 24 - Routes SMS for delivery */
+    MAP_SEND_ROUTING_INFO_FOR_SM(ProtocolInterface.SS7_MAP, 24,
+            "SendRoutingInfoForSM", OperationCategory.RECONNAISSANCE),
+
+    /** MAP opcode 44 - Reports SM delivery status */
+    MAP_REPORT_SM_DELIVERY_STATUS(ProtocolInterface.SS7_MAP, 44,
+            "ReportSM-DeliveryStatus", OperationCategory.RECONNAISSANCE),
+
+    /** MAP opcode 63 - Ready for SM (triggers SMS delivery) */
+    MAP_READY_FOR_SM(ProtocolInterface.SS7_MAP, 63,
+            "ReadyForSM", OperationCategory.MANIPULATION),
+
+    /** MAP opcode 66 - Sends IMSI (subscriber identity response) */
+    MAP_SEND_IMSI(ProtocolInterface.SS7_MAP, 66,
+            "SendIMSI", OperationCategory.RECONNAISSANCE),
+
+    /** MAP opcode 5 - Reset (clears subscriber data) */
+    MAP_RESET(ProtocolInterface.SS7_MAP, 5,
+            "Reset", OperationCategory.MANIPULATION),
+
+    /** MAP opcode 4 - Purge MS (removes subscriber from VLR) */
+    MAP_PURGE_MS(ProtocolInterface.SS7_MAP, 4,
+            "PurgeMS", OperationCategory.MANIPULATION),
+
+    /** MAP opcode 13 - Deactivates supplementary service */
+    MAP_DEACTIVATE_SS(ProtocolInterface.SS7_MAP, 13,
+            "DeactivateSS", OperationCategory.INTERCEPTION),
+
+    /** MAP opcode 11 - Erases supplementary service */
+    MAP_ERASE_SS(ProtocolInterface.SS7_MAP, 11,
+            "EraseSS", OperationCategory.INTERCEPTION),
+
+    /** MAP opcode 14 - Interrogates supplementary service status */
+    MAP_INTERROGATE_SS(ProtocolInterface.SS7_MAP, 14,
+            "InterrogateSS", OperationCategory.RECONNAISSANCE),
+
+    /** MAP opcode 6 - Restore data (restores subscriber data after reset) */
+    MAP_RESTORE_DATA(ProtocolInterface.SS7_MAP, 6,
+            "RestoreData", OperationCategory.MANIPULATION),
+
     // === Diameter S6a Operations (3GPP TS 29.272) ===
 
     /** Diameter cmd 316 - MME requests subscriber authentication vectors from HSS */

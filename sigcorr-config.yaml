@@ -32,8 +32,11 @@ evidence:
 
 # Whitelisting
 whitelist:
-  enabled: false
-  trusted_gt_pairs: []
+  enabled: true
+  trusted_gt_pairs:
+    - "491720000000"  # Trust this GT
+  home_network_prefixes:
+    - "44"
 
 # Output formats
 output:

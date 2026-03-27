@@ -43,6 +43,9 @@ public final class SignalingEvent {
     private final NetworkNode destinationNode;
     private final Map<String, String> parameters;
     private final Direction direction;
+    private final MessageType messageType;  // REQUEST, RESPONSE, or UNKNOWN
+    private final String sessionId;          // TCAP txn ID, Diameter Session-Id, or GTP sequence
+    private final String linkedEventId;      // Event ID of the request (for responses)
     private final byte[] rawBytes;
 
     private SignalingEvent(Builder builder) {
@@ -57,6 +60,9 @@ public final class SignalingEvent {
                 ? Collections.unmodifiableMap(builder.parameters)
                 : Collections.emptyMap();
         this.direction = builder.direction != null ? builder.direction : Direction.UNKNOWN;
+        this.messageType = builder.messageType != null ? builder.messageType : MessageType.UNKNOWN;
+        this.sessionId = builder.sessionId;
+        this.linkedEventId = builder.linkedEventId;
         this.rawBytes = builder.rawBytes;
     }
 
@@ -71,7 +77,25 @@ public final class SignalingEvent {
     public NetworkNode getDestinationNode() { return destinationNode; }
     public Map<String, String> getParameters() { return parameters; }
     public Direction getDirection() { return direction; }
+    public MessageType getMessageType() { return messageType; }
+    public String getSessionId() { return sessionId; }
+    public String getLinkedEventId() { return linkedEventId; }
     public byte[] getRawBytes() { return rawBytes != null ? rawBytes.clone() : null; }
+
+    /**
+     * Check if this is a request message (invoke, request, etc.)
+     */
+    public boolean isRequest() { return messageType == MessageType.REQUEST; }
+
+    /**
+     * Check if this is a response message (result, answer, etc.)
+     */
+    public boolean isResponse() { return messageType == MessageType.RESPONSE; }
+
+    /**
+     * Check if this event has a session/transaction ID for correlation.
+     */
+    public boolean hasSessionId() { return sessionId != null && !sessionId.isEmpty(); }
 
     /**
      * Get a specific parameter value.
@@ -85,6 +109,15 @@ public final class SignalingEvent {
      */
     public boolean sameSubscriber(SignalingEvent other) {
         return this.subscriber.couldMatch(other.subscriber);
+    }
+
+    /**
+     * Check if this event is part of the same transaction as another event.
+     * Returns true if both have session IDs and they match.
+     */
+    public boolean sameTransaction(SignalingEvent other) {
+        if (this.sessionId == null || other.sessionId == null) return false;
+        return this.sessionId.equals(other.sessionId);
     }
 
     /**
@@ -141,6 +174,9 @@ public final class SignalingEvent {
         private NetworkNode destinationNode;
         private Map<String, String> parameters;
         private Direction direction;
+        private MessageType messageType;
+        private String sessionId;
+        private String linkedEventId;
         private byte[] rawBytes;
 
         public Builder eventId(String eventId) { this.eventId = eventId; return this; }
@@ -152,6 +188,9 @@ public final class SignalingEvent {
         public Builder destinationNode(NetworkNode node) { this.destinationNode = node; return this; }
         public Builder parameters(Map<String, String> params) { this.parameters = params; return this; }
         public Builder direction(Direction dir) { this.direction = dir; return this; }
+        public Builder messageType(MessageType type) { this.messageType = type; return this; }
+        public Builder sessionId(String sid) { this.sessionId = sid; return this; }
+        public Builder linkedEventId(String linkedId) { this.linkedEventId = linkedId; return this; }
         public Builder rawBytes(byte[] raw) { this.rawBytes = raw; return this; }
 
         public SignalingEvent build() {
@@ -170,6 +209,20 @@ public final class SignalingEvent {
         /** Internal to home network */
         INTERNAL,
         /** Direction unknown */
+        UNKNOWN
+    }
+
+    /**
+     * Type of message in request/response protocols.
+     */
+    public enum MessageType {
+        /** Initial request (MAP invoke, Diameter Request, GTP request) */
+        REQUEST,
+        /** Response to a request (MAP returnResult, Diameter Answer, GTP response) */
+        RESPONSE,
+        /** Error response (MAP returnError, Diameter with error Result-Code) */
+        ERROR,
+        /** Unknown or not applicable */
         UNKNOWN
     }
 }

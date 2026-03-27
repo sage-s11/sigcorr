@@ -148,6 +148,48 @@ public class TemporalWindow {
         return subscriberEvents.size();
     }
 
+    /**
+     * Move all events from one correlation key to another.
+     * Used when identity resolution links two keys (e.g., MSISDN -> IMSI).
+     * After this call, sourceKey will have no events.
+     *
+     * @param sourceKey the key to move events from
+     * @param targetKey the key to move events to
+     * @return number of events moved
+     */
+    public int moveEvents(String sourceKey, String targetKey) {
+        if (sourceKey.equals(targetKey)) return 0;
+        
+        List<SignalingEvent> sourceEvents = subscriberEvents.remove(sourceKey);
+        if (sourceEvents == null || sourceEvents.isEmpty()) return 0;
+        
+        List<SignalingEvent> targetEvents = subscriberEvents.computeIfAbsent(
+                targetKey, k -> Collections.synchronizedList(new ArrayList<>()));
+        
+        int moved = 0;
+        synchronized (sourceEvents) {
+            synchronized (targetEvents) {
+                for (SignalingEvent event : sourceEvents) {
+                    // Avoid duplicates
+                    if (targetEvents.stream().noneMatch(e -> e.getEventId().equals(event.getEventId()))) {
+                        targetEvents.add(event);
+                        moved++;
+                    }
+                }
+            }
+        }
+        
+        return moved;
+    }
+
+    /**
+     * Check if a correlation key exists (has events).
+     */
+    public boolean hasKey(String correlationKey) {
+        List<SignalingEvent> events = subscriberEvents.get(correlationKey);
+        return events != null && !events.isEmpty();
+    }
+
     public Duration getWindowSize() {
         return windowSize;
     }

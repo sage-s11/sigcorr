@@ -1,6 +1,7 @@
 package io.sigcorr.correlation.engine;
 
 import io.sigcorr.detection.patterns.AttackPattern;
+import io.sigcorr.detection.whitelist.Whitelist;
 
 import java.time.Duration;
 import java.util.List;
@@ -15,6 +16,7 @@ public class EngineConfig {
     private long deduplicationWindowMs;
     private Set<String> homeNetworkIdentifiers;
     private List<AttackPattern> customPatterns;
+    private Whitelist whitelist;
 
     private EngineConfig() {}
 
@@ -24,6 +26,7 @@ public class EngineConfig {
         config.deduplicationWindowMs = 60_000L; // 1 minute dedup
         config.homeNetworkIdentifiers = Set.of();
         config.customPatterns = null; // Use built-in catalog
+        config.whitelist = Whitelist.disabled();
         return config;
     }
 
@@ -31,6 +34,7 @@ public class EngineConfig {
     public long getDeduplicationWindowMs() { return deduplicationWindowMs; }
     public Set<String> getHomeNetworkIdentifiers() { return homeNetworkIdentifiers; }
     public List<AttackPattern> getCustomPatterns() { return customPatterns; }
+    public Whitelist getWhitelist() { return whitelist; }
 
     public EngineConfig withCorrelationWindow(Duration d) {
         this.correlationWindow = d; return this;
@@ -46,5 +50,9 @@ public class EngineConfig {
 
     public EngineConfig withCustomPatterns(List<AttackPattern> patterns) {
         this.customPatterns = patterns; return this;
+    }
+
+    public EngineConfig withWhitelist(Whitelist whitelist) {
+        this.whitelist = whitelist; return this;
     }
 }

@@ -1,0 +1,68 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║           SigCorr Comprehensive Test Suite                          ║
+║           Sat Mar 28 01:44:10 AM IST 2026                                   ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m1. GENERATED ATTACK PATTERN TESTS[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+Generating test pcaps...
+  [1;33m[SKIP][0m ATK-001: Silent Location Tracking - file not found: ./test-pcaps/atk001_silent_location_tracking.pcap
+  [1;33m[SKIP][0m ATK-003: Cross-Protocol Tracking - file not found: ./test-pcaps/atk003_cross_protocol.pcap
+  [1;33m[SKIP][0m ATK-011: SMS Interception - file not found: ./test-pcaps/atk011_sms_interception.pcap
+  [1;33m[SKIP][0m ATK-014: Auth Vector Harvesting - file not found: ./test-pcaps/atk014_auth_harvesting.pcap
+  [0;32m[PASS][0m ATK-017: GTP Session Hijack - found: ATK-017,
+  [0;31m[FAIL][0m ATK-021: IMSI Catcher Detection - expected: ATK-021, found: 
+  [0;31m[FAIL][0m ATK-022: Cross-Protocol DoS - expected: ATK-022, found: 
+  [0;31m[FAIL][0m ATK-010: Diameter Location Hijack - expected: ATK-010, found: 
+  [0;32m[PASS][0m Full Multi-Protocol Attack Chain - found: ATK-001,ATK-003,
+  [1;33m[SKIP][0m Complex Multi-Phase Attack - file not found: ./test-pcaps/full_attack_chain.pcap
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m2. NEGATIVE TESTS (False Positive Prevention)[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+  [1;33m[SKIP][0m Normal Traffic (no attacks) - file not found: ./test-pcaps/normal_traffic.pcap
+  [0;32m[PASS][0m SS7 Only (should detect ATK-001) - found: ATK-001,
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m3. BOUNDARY AND EDGE CASE TESTS[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+  [1;33m[SKIP][0m Timing Edge Cases - file not found: ./test-pcaps/timing_edge_cases.pcap
+  [1;33m[SKIP][0m Multiple Attackers Same Target - file not found: ./test-pcaps/multi_attacker.pcap
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m4. PERFORMANCE TESTS[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+  [1;33m[SKIP][0m 100 Subscribers (max 10s) - file not found
+  [0;32m[PASS][0m Multi-Protocol (max 5s) - 817ms (max: 5000ms)
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m5. ROBUSTNESS TESTS[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+  [1;33m[SKIP][0m Wireshark: GSM MAP USSD - file not found
+  [1;33m[SKIP][0m Wireshark: CAMEL - file not found
+  [1;33m[SKIP][0m Wireshark: Diameter - file not found
+  [1;33m[SKIP][0m Wireshark: GTPv2 - file not found
+  [1;33m[SKIP][0m Wireshark: Packlog SS7 - file not found
+  [0;32m[PASS][0m Empty file - no crash
+  [0;32m[PASS][0m Non-PCAP file - no crash
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34m6. WHITELIST FUNCTIONALITY TESTS[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+  Testing whitelist suppression...
+  [0;32m[PASS][0m Whitelist partial match (cross-protocol not suppressed)
+
+[0;34m════════════════════════════════════════════════════════════[0m
+[0;34mTEST SUMMARY[0m
+[0;34m════════════════════════════════════════════════════════════[0m
+
+Total Tests:   24
+Passed:        [0;32m7[0m
+Failed:        [0;31m3[0m
+Skipped:       [1;33m14[0m
+
+Pass Rate:     70.0%
+
+Report saved:  ./test-results/test_report_20260328_014410.txt
+[0;31mSOME TESTS FAILED[0m

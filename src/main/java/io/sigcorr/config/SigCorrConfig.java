@@ -108,6 +108,39 @@ public class SigCorrConfig {
         return getInt("correlation.time_window_seconds", 300);
     }
     
+    /**
+     * Check if whitelist filtering is enabled
+     */
+    public boolean isWhitelistEnabled() {
+        return getBoolean("whitelist.enabled", false);
+    }
+    
+    /**
+     * Get list of trusted GT pairs (format: "sourceGT->destGT" or just "GT" for any direction)
+     * These are legitimate roaming/interconnect relationships that should not trigger alerts.
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> getTrustedGtPairs() {
+        Object value = getNestedValue("whitelist.trusted_gt_pairs");
+        if (value instanceof List) {
+            return (List<String>) value;
+        }
+        return Collections.emptyList();
+    }
+    
+    /**
+     * Get list of home network GT prefixes (e.g., "44" for UK, "1" for US)
+     * Traffic between home network nodes is considered legitimate.
+     */
+    @SuppressWarnings("unchecked")
+    public List<String> getHomeNetworkPrefixes() {
+        Object value = getNestedValue("whitelist.home_network_prefixes");
+        if (value instanceof List) {
+            return (List<String>) value;
+        }
+        return Collections.emptyList();
+    }
+    
     // Helper methods
     private int getInt(String path, int defaultValue) {
         Object value = getNestedValue(path);

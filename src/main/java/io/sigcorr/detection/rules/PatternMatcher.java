@@ -3,6 +3,7 @@ package io.sigcorr.detection.rules;
 import io.sigcorr.core.event.SignalingEvent;
 import io.sigcorr.detection.patterns.AttackPattern;
 import io.sigcorr.detection.scoring.SecurityAlert;
+import io.sigcorr.detection.whitelist.Whitelist;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,7 +19,8 @@ import java.util.*;
  *    contains the required operations in the correct order
  * 2. Verify temporal constraints (max window, inter-step delays)
  * 3. Verify source constraints (same source node if required)
- * 4. Calculate confidence score based on match completeness
+ * 4. Check whitelist (trusted GT pairs, home network traffic)
+ * 5. Calculate confidence score based on match completeness
  *
  * This is NOT a machine learning black box. Every detection can be traced
  * to a specific sequence of observed events matching a defined pattern.
@@ -30,9 +32,15 @@ public class PatternMatcher {
     private static final Logger log = LoggerFactory.getLogger(PatternMatcher.class);
 
     private final List<AttackPattern> patterns;
+    private final Whitelist whitelist;
 
     public PatternMatcher(List<AttackPattern> patterns) {
+        this(patterns, Whitelist.disabled());
+    }
+
+    public PatternMatcher(List<AttackPattern> patterns, Whitelist whitelist) {
         this.patterns = Objects.requireNonNull(patterns);
+        this.whitelist = Objects.requireNonNull(whitelist);
     }
 
     /**
@@ -76,6 +84,12 @@ public class PatternMatcher {
             return Optional.empty();
         }
 
+        // Check whitelist — if ALL events are from trusted sources, suppress alert
+        if (whitelist.isEnabled() && allEventsTrusted(matchedEvents)) {
+            log.debug("Suppressing alert for pattern {} — all events match whitelist", pattern.getPatternId());
+            return Optional.empty();
+        }
+
         // Calculate confidence
         double confidence = calculateConfidence(matchedEvents, steps, pattern);
 
@@ -84,6 +98,17 @@ public class PatternMatcher {
         metadata.put("patternStepsTotal", String.valueOf(steps.size()));
         metadata.put("patternStepsMatched", String.valueOf(matchedEvents.size()));
         metadata.put("crossProtocol", String.valueOf(isCrossProtocol(matchedEvents)));
+        
+        // Add whitelist info if partially matched
+        if (whitelist.isEnabled()) {
+            long trustedCount = matchedEvents.stream()
+                    .filter(whitelist::isTrusted)
+                    .count();
+            if (trustedCount > 0) {
+                metadata.put("trustedEventsCount", String.valueOf(trustedCount));
+                metadata.put("whitelistPartialMatch", "true");
+            }
+        }
 
         SecurityAlert alert = new SecurityAlert(
                 UUID.randomUUID().toString(),
@@ -97,6 +122,13 @@ public class PatternMatcher {
 
         log.info("Pattern match: {}", alert);
         return Optional.of(alert);
+    }
+
+    /**
+     * Check if all events in a sequence are from trusted sources.
+     */
+    private boolean allEventsTrusted(List<SignalingEvent> events) {
+        return events.stream().allMatch(whitelist::isTrusted);
     }
 
     /**

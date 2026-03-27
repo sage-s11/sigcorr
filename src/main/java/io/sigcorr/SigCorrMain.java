@@ -116,7 +116,23 @@ public class SigCorrMain {
             }
             if (!quiet) System.out.printf("Decoded %d signaling events%n%n", events.size());
 
-            CorrelationEngine engine = CorrelationEngine.createDefault();
+            // Build engine config with whitelist
+            io.sigcorr.detection.whitelist.Whitelist whitelist = io.sigcorr.detection.whitelist.Whitelist.fromConfig(
+                    config.isWhitelistEnabled(),
+                    config.getTrustedGtPairs(),
+                    config.getHomeNetworkPrefixes()
+            );
+            
+            if (verbose && whitelist.isEnabled()) {
+                System.out.printf("Whitelist enabled: %d trusted entries, home prefixes: %s%n", 
+                        whitelist.getTrustedPairCount(), config.getHomeNetworkPrefixes());
+            }
+            
+            io.sigcorr.correlation.engine.EngineConfig engineConfig = io.sigcorr.correlation.engine.EngineConfig.defaults()
+                    .withWhitelist(whitelist)
+                    .withCorrelationWindow(java.time.Duration.ofSeconds(config.getCorrelationWindowSeconds()));
+            
+            CorrelationEngine engine = new CorrelationEngine(engineConfig);
             engine.processBatch(events);
 
             // Export evidence if requested or auto-export enabled
