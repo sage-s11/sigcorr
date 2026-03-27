@@ -223,7 +223,6 @@ public class CorrelationEngine {
                 unique.add(newAlert);
             }
         }
-
         return unique;
     }
 

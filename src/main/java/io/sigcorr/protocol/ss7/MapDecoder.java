@@ -35,7 +35,7 @@ import java.util.*;
  * - UpdateLocation (opcode 2): re-register subscriber to new VLR
  * - SendAuthenticationInfo (opcode 56): get auth vectors
  */
-public class MapDecoder implements ProtocolDecoder {
+public class  MapDecoder implements ProtocolDecoder {
 
     private static final Logger log = LoggerFactory.getLogger(MapDecoder.class);
 

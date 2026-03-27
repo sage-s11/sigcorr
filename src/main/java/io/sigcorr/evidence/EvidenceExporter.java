@@ -128,25 +128,19 @@ public class EvidenceExporter {
      */
     private boolean exportPackets(Path sourcePcap, Path outputPcap, Set<Integer> packetNumbers) {
         try {
-            // Build packet range string for editcap
-            // editcap supports ranges like "1-5,10,15-20"
-            String packetRange = buildPacketRange(packetNumbers);
+            List<String> cmd = new ArrayList<>();
+            cmd.add(editcapPath);
+            cmd.add(sourcePcap.toAbsolutePath().toString());
+            cmd.add(outputPcap.toAbsolutePath().toString());
             
-            // Use editcap to extract packets
-            // editcap -r input.pcap output.pcap 1-5,10,15-20
-            List<String> cmd = Arrays.asList(
-                    editcapPath,
-                    "-r",  // Keep specified packets
-                    sourcePcap.toAbsolutePath().toString(),
-                    outputPcap.toAbsolutePath().toString(),
-                    packetRange
-            );
+            for (Integer pkt : packetNumbers) {
+                cmd.add(String.valueOf(pkt));
+            }
             
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             Process process = pb.start();
             
-            // Read output
             String output = new String(process.getInputStream().readAllBytes());
             int exitCode = process.waitFor();
             
@@ -167,40 +161,6 @@ public class EvidenceExporter {
      * Build packet range string from set of packet numbers.
      * Optimizes consecutive packets into ranges.
      */
-    private String buildPacketRange(Set<Integer> packetNumbers) {
-        List<Integer> sorted = new ArrayList<>(packetNumbers);
-        Collections.sort(sorted);
-        
-        StringBuilder range = new StringBuilder();
-        int rangeStart = -1;
-        int prev = -1;
-        
-        for (int pkt : sorted) {
-            if (rangeStart == -1) {
-                rangeStart = pkt;
-            } else if (pkt != prev + 1) {
-                // End of consecutive range
-                if (rangeStart == prev) {
-                    range.append(rangeStart).append(",");
-                } else {
-                    range.append(rangeStart).append("-").append(prev).append(",");
-                }
-                rangeStart = pkt;
-            }
-            prev = pkt;
-        }
-        
-        // Add final range
-        if (rangeStart != -1) {
-            if (rangeStart == prev) {
-                range.append(rangeStart);
-            } else {
-                range.append(rangeStart).append("-").append(prev);
-            }
-        }
-        
-        return range.toString();
-    }
     
     /**
      * Check if editcap is available.
