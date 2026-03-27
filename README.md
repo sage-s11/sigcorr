@@ -1,299 +1,253 @@
-# SigCorr SS7/MAP Field Extraction Fix Package
+# nfault
 
-**Status**: Ready for deployment  
-**Priority**: Critical (blocks MAP→Alert pipeline)  
-**Complexity**: Simple (2-line code change)  
-**Testing**: Validated via tshark -T ek
+**Structured network error classification for Node.js.**
 
----
+Every networking library surfaces raw OS error codes when a connection fails. You get `ECONNREFUSED`, `ETIMEDOUT`, or `certificate has expired` — without layer classification, cause analysis, retryability guidance, or escalation signals. The result is fragile string-matching, inconsistent retry logic, and delayed alerting.
 
-## Quick Start (5 minutes)
+`nfault` converts any raw network error into a structured, typed object with actionable fields.
 
-```bash
-# 1. Navigate to your SigCorr project
-cd ~/projects/tools/sigcorr
+```
+╔══ NetworkError ────────────────────────────────────────────────
+  code              tls/cert_expired
+  layer             TLS
+  fault             remote
+  causeConfidence   ● high
 
-# 2. Apply the fix (edit TsharkBridge.java)
-# Change: "e212.imsi" → "gsm_map.imsi_digits"
-# Change: "gsm_map.msisdn" → "gsm_map.msisdn_digits"
-# (See TsharkBridge_MAP_Fix.patch.java for exact changes)
+  safeRetryable     false
+  safeMaxRetries    0
+  escalateAfter     true
 
-# 3. Rebuild
-mvn clean package -DskipTests
+  host              api.payments.internal:443
 
-# 4. Test
-java -jar target/sigcorr-0.1.0.jar analyze \
-  test-pcaps/ss7_location_tracking.pcap --verbose
+  hint              TLS certificate has expired. Ops must renew immediately.
+                    Add expiry monitoring at 30/14/7 days.
 
-# Expected: ATK-001 (Location Tracking) alert fires
+  ── Possible causes ──────────────────────────────────────────
+  1. cert_not_renewed  ✕
+     Certificate not renewed before expiry
+     → Alert ops and security team immediately.
+
+  2. autorenewal_failed  ✕
+     Auto-renewal job (certbot/ACME) failed silently
+     → Check auto-renewal logs. Manual renewal required.
+
+  3. clock_skew  ✕
+     Client/server clocks out of sync (NTP failure)
+     → Check system time against NTP.
+╚════════════════════════════════════════════════════════════════
 ```
 
----
+## Key design insight
 
-## The Problem
+> **Transience is a property of the *cause*, not the symptom.**
+> The same `dns/timeout` has causes that are fully self-healing, partially self-healing, or permanently broken. A single `transient: boolean` collapses this distinction and leads to infinite retries on non-recoverable failures. `nfault` exposes possible causes with per-cause retryability flags.
 
-Your tshark output shows the issue clearly:
+## Install
 
-```json
-{
-  "timestamp": "1700001000000",
-  "layers": {
-    "frame_time_epoch": ["1700001000.000000000"],
-    "gsm_old_localValue": ["22"],
-    "sccp_calling_digits": ["491720000000"],
-    "sccp_called_digits": ["441234567890"]
-    // ✗ MISSING: IMSI and MSISDN fields are EMPTY
-  }
+```bash
+npm install nfault
+```
+
+## Usage
+
+### Core — works with any error
+
+```ts
+import { classify } from 'nfault';
+
+try {
+  await fetch('https://api.example.com/data');
+} catch (err) {
+  const e = classify(err as Error, { host: 'api.example.com', method: 'GET' });
+
+  console.log(e.code);           // 'tls/cert_expired'
+  console.log(e.safeRetryable);  // false
+  console.log(e.hint);
+  console.log(e.escalateAfter);  // true
+
+  if (e.isSecurityEvent) alertSecurityTeam(e);
+  if (e.escalateAfter)   pagerduty.trigger(e);
 }
 ```
 
-**Root Cause**: Wrong tshark field names don't extract from MAP operations.
+### With axios
 
----
+```ts
+import axios from 'axios';
+import { createAxiosInterceptor, formatSummary } from 'nfault';
 
-## The Solution
+const client = axios.create({ baseURL: 'https://api.example.com' });
 
-Use Wireshark display filter convenience fields:
-
-| Data | OLD (broken) | NEW (working) |
-|------|--------------|---------------|
-| IMSI | `e212.imsi` | `gsm_map.imsi_digits` |
-| MSISDN | `gsm_map.msisdn` | `gsm_map.msisdn_digits` |
-
-These fields work across **all** MAP operations (SRI, PSI, UpdateLocation, etc.)
-
----
-
-## Package Contents
-
-### Documentation (read first)
-1. **MAP_QUICK_REF.txt** ← START HERE - one-page cheat sheet
-2. **MAP_FIX_STRATEGY.md** - problem analysis and solution options
-3. **MAP_FIX_GUIDE.md** - complete step-by-step implementation guide
-
-### Code Changes
-4. **TsharkBridge_MAP_Fix.patch.java** - annotated code with exact changes
-
-### Testing Tools
-5. **verify_map_fix.sh** - pre-flight validation (run before applying fix)
-6. **analyze_map_pcap.py** - diagnostic analyzer (debug field extraction)
-7. **diagnose_map.py** - field discovery tool (find available fields)
-
----
-
-## Implementation Workflow
-
-### Phase 1: Verification (5 min)
-```bash
-# Verify current state is broken
-./verify_map_fix.sh
-
-# Expected: OLD fields empty, NEW fields populated
+client.interceptors.response.use(null, createAxiosInterceptor({
+  onError: (e) => {
+    logger.error(formatSummary(e));
+    if (e.escalateAfter)   pagerduty.trigger(e);
+    if (e.isSecurityEvent) securityChannel.alert(e);
+  }
+}));
 ```
 
-### Phase 2: Code Changes (5 min)
-Edit `src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java`:
+### With fetch
 
-**Change 1** - TSHARK_FIELDS array (line ~45):
-```java
-// OLD:
-private static final String[] TSHARK_FIELDS = {
-    "frame.time_epoch",
-    "gsm_old.localValue",
-    "e212.imsi",              // ← REMOVE
-    "gsm_map.msisdn",         // ← REMOVE
-    "sccp.calling.digits",
-    "sccp.called.digits"
-};
+```ts
+import { fetchWithClassification } from 'nfault';
 
-// NEW:
-private static final String[] TSHARK_FIELDS = {
-    "frame.time_epoch",
-    "gsm_old.localValue",
-    "gsm_map.imsi_digits",    // ← ADD
-    "gsm_map.msisdn_digits",  // ← ADD
-    "sccp.calling.digits",
-    "sccp.called.digits"
-};
+try {
+  const res = await fetchWithClassification('https://api.example.com', {
+    method: 'POST'
+  });
+} catch (e) {
+  console.log(e.requiresIdempotencyCheck); // true — don't auto-retry POST
+  console.log(e.code);                     // 'tcp/reset'
+}
 ```
 
-**Change 2** - parseEvent() method (line ~180):
-```java
-// OLD:
-String imsi = getField(layers, "e212_imsi");
-String msisdn = getField(layers, "gsm_map_msisdn");
+### With Winston / Pino
 
-// NEW:
-String imsi = getField(layers, "gsm_map_imsi_digits");
-String msisdn = getField(layers, "gsm_map_msisdn_digits");
+```ts
+import winston from 'winston';
+import { classify, createWinstonErrorHandler } from 'nfault';
+
+const logger = winston.createLogger({
+  transports: [new winston.transports.Console()],
+  format: winston.format.json(),
+});
+
+const handleError = createWinstonErrorHandler(logger, {
+  onSecurityEvent: (e) => securityChannel.alert(e),
+  onEscalate:      (e) => pagerduty.trigger(e),
+});
+
+try {
+  await fetch('https://api.example.com');
+} catch (err) {
+  const e = classify(err as Error, { host: 'api.example.com' });
+  handleError(e);
+}
 ```
 
-### Phase 3: Build & Test (5 min)
-```bash
-# Rebuild
-mvn clean compile test
+### With native node:http / node:https
 
-# Package
-mvn package -DskipTests
+```ts
+import { requestWithClassification } from 'nfault';
 
-# Test end-to-end
-java -jar target/sigcorr-0.1.0.jar analyze \
-  test-pcaps/ss7_location_tracking.pcap --verbose
+try {
+  const { body } = await requestWithClassification('https://api.example.com/data');
+} catch (e) {
+  console.log(e.code, e.hint);
+}
 ```
 
-### Phase 4: Cross-Protocol Validation (10 min)
-```bash
-# Generate cross-protocol pcap (if needed)
-cd test-pcaps
-python3 generate_cross_protocol_attack.py
+### DNS rolling-window detector
 
-# Test MAP → Diameter → GTP correlation
-java -jar ../target/sigcorr-0.1.0.jar analyze \
-  cross_protocol_reconnaissance.pcap --verbose
+```ts
+import { classify, DnsFailureDetector } from 'nfault';
 
-# Expected: ATK-009 (Cross-Protocol Reconnaissance) fires
+const detector = new DnsFailureDetector({ windowMs: 60000, minDistinctHosts: 3 });
+
+const e = classify(err, { host });
+const result = detector.record(e);
+// If 3+ distinct hosts fail within 60s:
+// result.causeConfidence → 'high'
+// result.possibleCauses[0].id → 'resolver_unreachable'
+// result.safeRetryable → false
 ```
 
----
-
-## Success Criteria
-
-- [x] `tshark -T ek` extracts `gsm_map_imsi_digits` ✓
-- [x] `tshark -T ek` extracts `gsm_map_msisdn_digits` ✓
-- [ ] `mvn test` passes all 110+ tests
-- [ ] MAP pcap generates SignalingEvent objects with IMSI/MSISDN
-- [ ] ATK-001 alert fires on `ss7_location_tracking.pcap`
-- [ ] ATK-009 alert fires on cross-protocol pcap
-- [ ] All three protocol families (SS7, Diameter, GTP) produce alerts
-
----
-
-## Diagnostic Commands
+## CLI
 
 ```bash
-# Test field extraction directly
-tshark -r test-pcaps/ss7_location_tracking.pcap -Y "gsm_map" -T ek \
-  -e gsm_map.imsi_digits -e gsm_map.msisdn_digits | grep -v index | head -3
-
-# Analyze pcap comprehensively
-python3 analyze_map_pcap.py test-pcaps/ss7_location_tracking.pcap
-
-# Check Wireshark field support
-tshark -G fields | grep gsm_map.imsi_digits
+npx nfault diagnose api.example.com
+npx nfault diagnose api.example.com 5432
+npx nfault diagnose api.example.com --tls
+npx nfault diagnose api.example.com --dns
+npx nfault diagnose api.example.com --tls --watch
+npx nfault diagnose api.example.com --tls --watch --interval 30
+npx nfault explain tls/cert_expired
+npx nfault list
+npx nfault check api.example.com
 ```
 
----
+## Output modes
 
-## Why This Fix Works
+```ts
+import { formatNetworkError, formatSummary, formatCompact } from 'nfault';
 
-1. **Display Filter Fields**: `gsm_map.imsi_digits` is a Wireshark "convenience field" that extracts IMSI from ANY MAP operation that carries it (not operation-specific like `gsm_map.sendRoutingInfo.msisdn`)
+// Full verbose — CLI / debugging only
+console.log(formatNetworkError(e));
 
-2. **Cross-Operation Support**: Works for:
-   - SendRoutingInfo (op=22) - MSISDN in request, IMSI in response
-   - ProvideSubscriberInfo (op=71) - IMSI in request
-   - UpdateLocation (op=2) - IMSI in request
-   - InsertSubscriberData (op=7) - IMSI in request
+// Single line — safe for production logs, won't flood
+console.log(formatSummary(e));
+// → [nfault] tls/cert_expired | conf:high | fault:remote | retry:no | ↑escalate | api.example.com
 
-3. **EK Compatibility**: tshark -T ek can extract these display filter fields, converting dots→underscores for JSON keys:
-   - `gsm_map.imsi_digits` → `gsm_map_imsi_digits` (JSON)
-   - `gsm_map.msisdn_digits` → `gsm_map_msisdn_digits` (JSON)
-
----
-
-## Attack Patterns Enabled by This Fix
-
-Once MAP extraction works, these patterns become detectable:
-
-**Single-Protocol (SS7/MAP)**
-- ATK-001: Silent Location Tracking (SRI → PSI)
-- ATK-002: SMS Interception (SRI → ForwardSM)
-- ATK-003: Subscriber Enumeration (SRI flood)
-- ATK-004: MSISDN Spoofing (UpdateLocation fake IMSI)
-- ATK-005: HLR Flooding (SAI flood)
-
-**Cross-Protocol**
-- ATK-009: Cross-Protocol Reconnaissance (MAP → Diameter → GTP)
-- ATK-010: Location Hijack (Diameter ULR spoofing)
-
----
-
-## Troubleshooting
-
-### Issue: "gsm_map_imsi_digits still empty"
-**Diagnosis**: Wireshark version may not support these fields  
-**Fix**: `tshark -G fields | grep gsm_map.imsi_digits` should show field definition  
-**Alternative**: Upgrade Wireshark to 3.6+ or use PDML parsing (Option 2 in MAP_FIX_STRATEGY.md)
-
-### Issue: "Tests fail after fix"
-**Diagnosis**: Missed updating a field reference  
-**Fix**: Search codebase for `e212_imsi` and `gsm_map_msisdn` - all should be updated to new names
-
-### Issue: "Events parsed but no alerts"
-**Diagnosis**: IdentityResolver may not be learning mappings  
-**Fix**: Add debug logging in `CorrelationEngine.processEvent()`:
-```java
-logger.info("Registered mapping: {} ↔ {}", imsi, msisdn);
+// JSON — for Datadog, Splunk, ELK pipelines
+console.log(formatCompact(e));
+// → {"code":"tls/cert_expired","layer":"tls","fault":"remote",...}
 ```
 
----
+## NetworkError schema
 
-## Next Steps After Fix
+| Field | Description | Example |
+|---|---|---|
+| `.code` | Namespaced error identifier | `"tls/cert_expired"` |
+| `.layer` | Stack layer where failure occurred | `"dns" \| "tcp" \| "tls" \| "http"` |
+| `.causeConfidence` | How certain we are about root cause | `"high" \| "medium" \| "low"` |
+| `.possibleCauses[]` | Ordered causes with per-cause retryability | `[{ id, retryable, delay, action }]` |
+| `.fault` | Who is responsible | `"remote" \| "network" \| "config" \| "client"` |
+| `.safeRetryable` | Conservative retry flag | `true \| false` |
+| `.safeMaxRetries` | Max retries before mandatory escalation | `0 \| 1 \| 2 \| 3` |
+| `.safeDelay` | Suggested backoff in ms | `1000 \| 5000 \| null` |
+| `.escalateAfter` | Alert ops if retries exhausted? | `true \| false` |
+| `.isSecurityEvent` | Route to security team, not ops queue | `true \| false` |
+| `.requiresIdempotencyCheck` | Non-idempotent request — caller decides retry | `true \| false` |
+| `.hint` | Human-readable remediation hint | `"Check /etc/resolv.conf..."` |
 
-1. **Validate all 10 attack patterns** against test pcaps
-2. **Generate cross-protocol test suite**:
-   - MAP SRI → Diameter AIR → GTP CreateSession
-   - Diameter ULR → GTP ModifyBearer (ATK-010)
-3. **Performance test**: 1M-packet pcap (<10s target)
-4. **Integration test**: End-to-end pcap → events → alerts
-5. **Documentation**: Update architecture docs with field mappings
+## Error coverage — v1.0
 
----
+| Code | Layer | Confidence | Notes |
+|---|---|---|---|
+| `dns/timeout` | DNS | low → high* | *upgrades via rolling-window detector |
+| `dns/nxdomain` | DNS | high | |
+| `dns/servfail` | DNS | medium | |
+| `dns/refused` | DNS | high | |
+| `tcp/refused` | TCP | medium | |
+| `tcp/timeout` | TCP | low | |
+| `tcp/reset` | TCP | medium | |
+| `tls/cert_expired` | TLS | high | |
+| `tls/handshake_failed` | TLS | high | |
+| `tls/hostname_mismatch` | TLS | high | `isSecurityEvent: true` |
+| `tls/untrusted_cert` | TLS | medium | |
+| `tls/cert_revoked` | TLS | high | `isSecurityEvent: true` |
+| `http/rate_limited` | HTTP | high | Parses `Retry-After` header |
+| `http/auth_failure` | HTTP | medium | 401 retryable, 403 not |
+| `http/request_timeout` | HTTP | medium | 408 + 504 |
+| `http/server_error` | HTTP | medium | 500 + 502 + 503 |
+| `http/not_found` | HTTP | high | |
 
-## Files Modified
+## Security event routing
 
-- `src/main/java/io/sigcorr/ingest/tshark/TsharkBridge.java` (2 changes)
+`isSecurityEvent: true` is set on errors that should go to a security channel, not the ops queue:
 
-**No test changes required** - tests use mocked tshark output or pre-generated events, so field name changes are transparent to the test suite.
+- `tls/cert_revoked` — certificate explicitly revoked by CA
+- `tls/hostname_mismatch` — could indicate man-in-the-middle
 
----
+## Non-idempotent request protection
 
-## Technical Context
+For POST, PUT, PATCH, DELETE, `nfault` sets `requiresIdempotencyCheck: true` even when the transport error would normally be retryable. A lost TCP connection mid-POST could mean the request was processed or not — retrying could cause duplicate charges or double writes. The library surfaces this flag and leaves the retry decision to the application layer.
 
-**Project**: SigCorr - passive cross-interface telecom signaling correlator  
-**Scope**: First open-source tool correlating SS7/MAP + Diameter + GTPv2-C  
-**Status**: 110+ tests passing, 10 attack patterns, Diameter/GTP proven end-to-end  
-**Blocker**: SS7/MAP pcap→alert pipeline (this fix resolves it)
+## Research basis
 
-**Author**: Xyzzz (GitHub: sage-s11)  
-**Background**: DDI expert (Infoblox/UltraDNS), network security researcher  
-**Related Work**: DNS-over-QUIC downgrade paper (Computers & Security, 2026)
+The taxonomy behind this library is grounded in research on DNS-over-QUIC downgrade attacks and protocol fallback behavior (Computers & Security, Elsevier, 2026). The cause-confidence model and per-cause retryability flags emerged from classifying real attack-induced error surfaces across five DNS client implementations.
 
----
+## Roadmap
 
-## References
+- **v1.1** — Python port (`pip install nfault`)
+- **v1.2** — QUIC/HTTP3 error classification (DoQ error taxonomy from research)
+- **v1.3** — gRPC status codes, WebSocket close codes
 
-- **Wireshark MAP Dissector**: https://www.wireshark.org/docs/dfref/g/gsm_map.html
-- **3GPP TS 29.002**: MAP specification (protocol reference)
-- **Tshark EK Output**: `tshark -G elastic-mapping` (field mappings)
+## Contributing
 
----
+See [CONTRIBUTING.md](./CONTRIBUTING.md). New error types must be proposed in the taxonomy spec first — see [docs/taxonomy.md](./docs/taxonomy.md).
 
 ## License
 
-Same as parent SigCorr project (assumed Apache 2.0 or MIT)
-
----
-
-## Support
-
-For questions or issues:
-1. Check **MAP_QUICK_REF.txt** first
-2. Review tshark output: `./verify_map_fix.sh`
-3. Analyze pcap: `python3 analyze_map_pcap.py <pcap>`
-4. Open issue on GitHub: sage-s11/sigcorr
-
----
-
-**Last Updated**: 2026-03-25  
-**Package Version**: 1.0  
-**Tested Against**: SigCorr 0.1.0, Wireshark 3.6+, Maven 3.8+, Java 21
+MIT
