@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use SigCorr in your research, please cite it using these metadata."
+title: "SigCorr: Passive Cross-Protocol Attack Detection for Mobile Core Networks"
+type: software
+authors:
+  - family-names: "S"
+    given-names: "Shreyas"
+    alias: "sage-s11"
+version: "0.1.0"
+date-released: "2026-03-28"
+license: AGPL-3.0
+url: "https://github.com/sage-s11/sigcorr"
+repository-code: "https://github.com/sage-s11/sigcorr"
+keywords:
+  - telecom security
+  - SS7
+  - Diameter
+  - GTPv2-C
+  - cross-protocol correlation
+  - signaling security
+  - mobile core network
+  - attack detection
+abstract: >-
+  SigCorr is the first open-source tool to detect cross-protocol
+  attack chains spanning SS7/MAP, Diameter S6a, and GTPv2-C
+  interfaces in mobile core networks. It performs unified subscriber
+  identity correlation across protocol boundaries to detect
+  multi-stage attacks that single-interface monitors miss.
+  SigCorr supports 22 attack pattern signatures including
+  location tracking, interception setup, authentication harvesting,
+  and cross-protocol downgrade attacks.
