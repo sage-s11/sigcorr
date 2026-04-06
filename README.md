@@ -6,6 +6,7 @@ SigCorr is the first open-source tool to detect cross-protocol attack chains spa
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 [![Java 17+](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19439509.svg)](https://doi.org/10.5281/zenodo.19439509)
 
 ---
 
