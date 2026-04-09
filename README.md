@@ -237,7 +237,7 @@ See [LICENSE](LICENSE) for the full text.
 
 If the AGPL does not work for your use case — for example, if you want to embed SigCorr into a proprietary product or offer it as part of a commercial service without the AGPL's source-sharing requirements — a **commercial license** is available.
 
-Contact **Shreyas S** at [shreyas@sigcorr.io](mailto:shreyas@sigcorr.io) or open a [GitHub Issue](https://github.com/sage-s11/sigcorr/issues) tagged `licensing` to discuss.
+Contact **Shreyas S** at [shrey.sneh650@gmail.com](mailto:shrey.sneh650@gmail.com) or open a [GitHub Issue](https://github.com/sage-s11/sigcorr/issues) tagged `licensing` to discuss.
 
 ---
 
