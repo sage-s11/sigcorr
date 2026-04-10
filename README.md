@@ -5,7 +5,6 @@
 SigCorr is the first open-source tool to detect cross-protocol attack chains spanning SS7/MAP, Diameter S6a, and GTPv2-C through unified subscriber identity correlation.
 
 [![CI](https://github.com/sage-s11/sigcorr/actions/workflows/ci.yml/badge.svg)](https://github.com/sage-s11/sigcorr/actions/workflows/ci.yml)
-[![CI](https://github.com/sage-s11/sigcorr/actions/workflows/ci.yml/badge.svg)](https://github.com/sage-s11/sigcorr/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://opensource.org/licenses/AGPL-3.0)
 [![Java 17+](https://img.shields.io/badge/Java-17%2B-orange.svg)](https://openjdk.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://github.com/sage-s11/sigcorr/blob/main/Dockerfile)
