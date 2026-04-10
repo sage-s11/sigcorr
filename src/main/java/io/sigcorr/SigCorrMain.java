@@ -8,6 +8,7 @@ import io.sigcorr.ingest.tshark.TsharkBridge;
 import io.sigcorr.config.SigCorrConfig;
 import io.sigcorr.evidence.EvidenceExporter;
 import io.sigcorr.output.json.JsonOutputFormatter;
+import io.sigcorr.output.csv.CsvOutputFormatter;
 import io.sigcorr.core.event.SignalingEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class SigCorrMain {
 
@@ -26,6 +28,7 @@ public class SigCorrMain {
     private static boolean verbose = false;
     private static boolean quiet = false;
     private static boolean jsonOutput = false;
+    private static boolean csvOutput = false;
     private static boolean exportEvidence = false;
 
     private static final String BANNER = """
@@ -47,8 +50,14 @@ public class SigCorrMain {
         switch (command) {
             case "demo" -> runDemo();
             case "analyze" -> {
-                if (remaining.size() < 2) { System.err.println("Usage: sigcorr analyze <pcap-file>"); System.exit(1); }
-                runAnalyze(remaining.get(1));
+                if (remaining.size() < 2) { System.err.println("Usage: sigcorr analyze <pcap-file-or-directory>"); System.exit(1); }
+                String target = remaining.get(1);
+                Path targetPath = Path.of(target);
+                if (Files.isDirectory(targetPath)) {
+                    runBatchAnalyze(targetPath);
+                } else {
+                    runAnalyze(target);
+                }
             }
             case "patterns" -> listPatterns();
             case "version" -> System.out.println("sigcorr v" + VERSION);
@@ -63,9 +72,24 @@ public class SigCorrMain {
             switch (arg) {
                 case "--verbose", "-v" -> verbose = true;
                 case "--quiet", "-q" -> quiet = true;
-                case "--json" -> jsonOutput = true;
+                case "--json" -> { jsonOutput = true; csvOutput = false; }
+                case "--csv" -> { csvOutput = true; jsonOutput = false; }
+                case "--format" -> {} // handled with next arg below
                 case "--export-evidence" -> exportEvidence = true;
-                default -> remaining.add(arg);
+                default -> {
+                    // Handle --format json / --format csv
+                    if (!remaining.isEmpty() && remaining.get(remaining.size() - 1).equals("--format")) {
+                        remaining.remove(remaining.size() - 1);
+                        switch (arg.toLowerCase()) {
+                            case "json" -> { jsonOutput = true; csvOutput = false; }
+                            case "csv" -> { csvOutput = true; jsonOutput = false; }
+                            case "console", "text" -> { jsonOutput = false; csvOutput = false; }
+                            default -> System.err.println("Unknown format: " + arg + " (use json, csv, or console)");
+                        }
+                    } else {
+                        remaining.add(arg);
+                    }
+                }
             }
         }
         return remaining;
@@ -145,6 +169,8 @@ public class SigCorrMain {
 
             if (jsonOutput) {
                 System.out.println(new JsonOutputFormatter().formatReport(engine));
+            } else if (csvOutput) {
+                System.out.print(new CsvOutputFormatter().formatReport(engine));
             } else {
                 printResults(engine);
             }
@@ -155,6 +181,118 @@ public class SigCorrMain {
         }
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  BATCH ANALYZE — process all pcaps in a directory
+    // ════════════════════════════════════════════════════════════════
+
+    private static void runBatchAnalyze(Path directory) {
+        if (!quiet) {
+            System.out.println(BANNER);
+            System.out.println("Batch analyzing: " + directory.toAbsolutePath() + "\n");
+        }
+
+        List<Path> pcapFiles;
+        try (Stream<Path> stream = Files.list(directory)) {
+            pcapFiles = stream
+                    .filter(p -> {
+                        String name = p.getFileName().toString().toLowerCase();
+                        return name.endsWith(".pcap") || name.endsWith(".pcapng") || name.endsWith(".cap");
+                    })
+                    .sorted()
+                    .toList();
+        } catch (IOException e) {
+            System.err.println("Failed to list directory: " + e.getMessage());
+            System.exit(1);
+            return;
+        }
+
+        if (pcapFiles.isEmpty()) {
+            System.out.println("No pcap files found in " + directory);
+            return;
+        }
+
+        if (!quiet) System.out.printf("Found %d pcap file(s)%n%n", pcapFiles.size());
+
+        // Load configuration once
+        SigCorrConfig config;
+        try {
+            config = SigCorrConfig.loadDefault();
+        } catch (IOException e) {
+            config = SigCorrConfig.createDefault();
+        }
+
+        TsharkBridge bridge = new TsharkBridge();
+        if (!bridge.isTsharkAvailable()) {
+            System.err.println("ERROR: tshark not found on PATH");
+            System.exit(1);
+        }
+
+        // Build shared engine config
+        io.sigcorr.detection.whitelist.Whitelist whitelist = io.sigcorr.detection.whitelist.Whitelist.fromConfig(
+                config.isWhitelistEnabled(),
+                config.getTrustedGtPairs(),
+                config.getHomeNetworkPrefixes()
+        );
+        io.sigcorr.correlation.engine.EngineConfig engineConfig = io.sigcorr.correlation.engine.EngineConfig.defaults()
+                .withWhitelist(whitelist)
+                .withCorrelationWindow(java.time.Duration.ofSeconds(config.getCorrelationWindowSeconds()));
+
+        // Single engine across all files for cross-file correlation
+        CorrelationEngine engine = new CorrelationEngine(engineConfig);
+
+        int totalFiles = 0;
+        int totalEvents = 0;
+        int filesWithAlerts = 0;
+
+        for (Path pcapFile : pcapFiles) {
+            totalFiles++;
+            if (!quiet) System.out.printf("── [%d/%d] %s%n", totalFiles, pcapFiles.size(), pcapFile.getFileName());
+
+            try {
+                List<SignalingEvent> events = bridge.decodePcap(pcapFile);
+                totalEvents += events.size();
+
+                if (events.isEmpty()) {
+                    if (!quiet) System.out.println("   No signaling events found\n");
+                    continue;
+                }
+
+                int alertsBefore = engine.getAlerts().size();
+                engine.processBatch(events);
+                int newAlerts = engine.getAlerts().size() - alertsBefore;
+
+                if (newAlerts > 0) filesWithAlerts++;
+                if (!quiet) System.out.printf("   %d events, %d new alert(s)%n%n", events.size(), newAlerts);
+
+                // Export evidence per file
+                boolean shouldExport = exportEvidence || config.isAutoExportEnabled();
+                if (shouldExport && newAlerts > 0) {
+                    List<SecurityAlert> recentAlerts = engine.getAlerts().subList(
+                            engine.getAlerts().size() - newAlerts, engine.getAlerts().size());
+                    exportEvidencePcaps(recentAlerts, pcapFile, events, config);
+                }
+
+            } catch (IOException | InterruptedException e) {
+                System.err.printf("   ERROR: %s%n%n", e.getMessage());
+            }
+        }
+
+        // Print combined results
+        if (!quiet) {
+            System.out.println("═══════════════════════════════════════════════");
+            System.out.printf("  Batch Summary: %d files, %d events, %d files with alerts%n",
+                    totalFiles, totalEvents, filesWithAlerts);
+            System.out.println("═══════════════════════════════════════════════\n");
+        }
+
+        if (jsonOutput) {
+            System.out.println(new JsonOutputFormatter().formatReport(engine));
+        } else if (csvOutput) {
+            System.out.print(new CsvOutputFormatter().formatReport(engine));
+        } else {
+            printResults(engine);
+        }
+    }
 
     /**
      * Export evidence pcap files for detected alerts
@@ -258,13 +396,14 @@ public class SigCorrMain {
         var legit = gen.generateLegitimateTraffic(50, t.plusSeconds(2100));
         var fp = engine.processBatch(legit);
         System.out.printf("  Events: %d | Alerts: %d%n", legit.size(), fp.size());
-        System.out.println(fp.isEmpty() ? "  ✅ No false positives" : "  ⚠️  FALSE POSITIVES");
+        System.out.println(fp.isEmpty() ? "  ✅ No false positives" : "  ⚠  FALSE POSITIVES");
         System.out.println();
 
         System.out.println(engine.getSummary());
         printResults(engine);
 
         if (jsonOutput) System.out.println(new JsonOutputFormatter().formatReport(engine));
+        if (csvOutput) System.out.print(new CsvOutputFormatter().formatReport(engine));
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -299,6 +438,7 @@ public class SigCorrMain {
                 Commands:
                   demo                  Run synthetic attack scenario demo
                   analyze <pcap>        Analyze a pcap file (requires tshark)
+                  analyze <directory>   Batch analyze all pcap files in a directory
                   patterns              List all detection patterns
                   version               Show version
                   help                  Show this help
@@ -307,11 +447,19 @@ public class SigCorrMain {
                   --verbose, -v         Debug output with event details
                   --quiet, -q           Suppress banner and info messages
                   --json                Output results as JSON
+                  --csv                 Output results as CSV
+                  --format <fmt>        Output format: json, csv, or console
                   --export-evidence     Export evidence pcaps for detected alerts
                 
                 Configuration:
                   Config file: ./sigcorr-config.yaml (optional)
                   Evidence output: ./evidence/ (configurable)
+                
+                Examples:
+                  sigcorr analyze capture.pcap
+                  sigcorr analyze capture.pcap --json
+                  sigcorr analyze ./captures/ --format csv
+                  sigcorr analyze capture.pcap --export-evidence
                 """);
     }
 }

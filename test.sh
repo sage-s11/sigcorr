@@ -14,7 +14,7 @@ echo "════════════════════════�
 echo
 
 # Check JAR exists
-if [ ! -f "target/sigcorr-0.1.0.jar" ]; then
+if [ ! -f "target/sigcorr-0.1.0-all.jar" ]; then
     echo "Building SigCorr..."
     mvn clean package -DskipTests -q
 fi
@@ -46,7 +46,7 @@ test_pcap() {
         return
     fi
     
-    output=$(java -jar target/sigcorr-0.1.0.jar analyze "test-pcaps/$pcap" 2>&1)
+    output=$(java -jar target/sigcorr-0.1.0-all.jar analyze "test-pcaps/$pcap" 2>&1)
     
     if echo "$output" | grep -q "$expected"; then
         echo "  [PASS] $name"
@@ -70,7 +70,7 @@ test_pcap "cross_protocol_auth_downgrade.pcap" "ATK-005" "ATK-005: Auth Downgrad
 # Negative test (no alerts expected)
 echo
 echo "  Negative tests:"
-output=$(java -jar target/sigcorr-0.1.0.jar analyze "test-pcaps/normal_traffic.pcap" 2>&1)
+output=$(java -jar target/sigcorr-0.1.0-all.jar analyze "test-pcaps/normal_traffic.pcap" 2>&1)
 if echo "$output" | grep -q "No attack patterns detected"; then
     echo "  [PASS] Normal traffic - no false positives"
     PASSED=$((PASSED + 1))

@@ -1,0 +1,13 @@
+target/
+.git/
+.gitignore
+*.pcap
+!test-pcaps/**/*.pcap
+evidence/
+test-results/
+dependency-reduced-pom.xml
+README.md
+CONTRIBUTING.md
+SECURITY.md
+CITATION.cff
+LICENSE
