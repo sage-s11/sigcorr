@@ -160,6 +160,12 @@ public final class SignalingEvent {
 
     // === Builder ===
 
+    /** Returns true if this event is from a 5G protocol. */
+    public boolean is5G() { return protocolInterface != null && protocolInterface.is5G(); }
+
+    /** Returns true if this event is from a legacy protocol. */
+    public boolean isLegacy() { return protocolInterface != null && protocolInterface.isLegacy(); }
+
     public static Builder builder() {
         return new Builder();
     }

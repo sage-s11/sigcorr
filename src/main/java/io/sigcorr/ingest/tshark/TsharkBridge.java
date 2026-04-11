@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.*;
 
+
 /**
  * Bridge between tshark (Wireshark CLI) and SigCorr's normalized event model.
  *
@@ -82,6 +83,9 @@ public class TsharkBridge {
         allEvents.addAll(decodeMapEvents(pcapFile));
         allEvents.addAll(decodeDiameterEvents(pcapFile));
         allEvents.addAll(decodeGtpcEvents(pcapFile));
+        allEvents.addAll(decode5gNasEvents(pcapFile));
+        allEvents.addAll(decodeNgapEvents(pcapFile));
+        allEvents.addAll(decodePfcpEvents(pcapFile));
 
         // Sort chronologically
         allEvents.sort(Comparator.comparing(SignalingEvent::getTimestamp));
@@ -204,6 +208,100 @@ public class TsharkBridge {
         return events;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  5G NAS event decoding
+    // ════════════════════════════════════════════════════════════════
+
+    private List<SignalingEvent> decode5gNasEvents(Path pcapFile) throws IOException, InterruptedException {
+        String[] fields = {
+                "-e", "frame.time_epoch",
+                "-e", "nas-5gs.mm.message_type",
+                "-e", "nas-5gs.sm.message_type",
+                "-e", "nas-5gs.mm.type_id",
+                "-e", "nas-5gs.mm.imeisv",
+                "-e", "nas-5gs.mm.nas_sec_algo_enc",
+                "-e", "nas-5gs.mm.nas_sec_algo_ip",
+                "-e", "e212.imsi",
+                "-e", "ip.src",
+                "-e", "ip.dst",
+        };
+        String filter = "nas-5gs";
+        List<JsonObject> packets = runTshark(pcapFile, filter, fields);
+        List<SignalingEvent> events = new ArrayList<>();
+        for (JsonObject pkt : packets) {
+            try {
+                SignalingEvent event = parse5gNasPacket(pkt);
+                if (event != null) events.add(event);
+            } catch (Exception e) {
+                log.debug("Failed to parse 5G NAS packet: {}", e.getMessage());
+            }
+        }
+        log.debug("Decoded {} 5G NAS events", events.size());
+        return events;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  NGAP event decoding
+    // ════════════════════════════════════════════════════════════════
+
+    private List<SignalingEvent> decodeNgapEvents(Path pcapFile) throws IOException, InterruptedException {
+        String[] fields = {
+                "-e", "frame.time_epoch",
+                "-e", "ngap.procedureCode",
+                "-e", "ngap.RAN_UE_NGAP_ID",
+                "-e", "ngap.AMF_UE_NGAP_ID",
+                "-e", "ngap.Cause",
+                "-e", "ngap.TAC",
+                "-e", "ngap.HandoverType",
+                "-e", "ngap.TargetID",
+                "-e", "ip.src",
+                "-e", "ip.dst",
+        };
+        String filter = "ngap";
+        List<JsonObject> packets = runTshark(pcapFile, filter, fields);
+        List<SignalingEvent> events = new ArrayList<>();
+        for (JsonObject pkt : packets) {
+            try {
+                SignalingEvent event = parseNgapPacket(pkt);
+                if (event != null) events.add(event);
+            } catch (Exception e) {
+                log.debug("Failed to parse NGAP packet: {}", e.getMessage());
+            }
+        }
+        log.debug("Decoded {} NGAP events", events.size());
+        return events;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  PFCP event decoding
+    // ════════════════════════════════════════════════════════════════
+
+    private List<SignalingEvent> decodePfcpEvents(Path pcapFile) throws IOException, InterruptedException {
+        String[] fields = {
+                "-e", "frame.time_epoch",
+                "-e", "pfcp.msg_type",
+                "-e", "pfcp.seid",
+                "-e", "pfcp.seqno",
+                "-e", "pfcp.node_id_ipv4",
+                "-e", "pfcp.f_teid.ipv4_addr",
+                "-e", "pfcp.ue_ip_addr_ipv4",
+                "-e", "ip.src",
+                "-e", "ip.dst",
+        };
+        String filter = "pfcp";
+        List<JsonObject> packets = runTshark(pcapFile, filter, fields);
+        List<SignalingEvent> events = new ArrayList<>();
+        for (JsonObject pkt : packets) {
+            try {
+                SignalingEvent event = parsePfcpPacket(pkt);
+                if (event != null) events.add(event);
+            } catch (Exception e) {
+                log.debug("Failed to parse PFCP packet: {}", e.getMessage());
+            }
+        }
+        log.debug("Decoded {} PFCP events", events.size());
+        return events;
+    }
     // ════════════════════════════════════════════════════════════════
     //  tshark execution
     // ════════════════════════════════════════════════════════════════
@@ -494,13 +592,170 @@ public class TsharkBridge {
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  5G Packet -> SignalingEvent mapping
+    // ════════════════════════════════════════════════════════════════
+
+    private SignalingEvent parse5gNasPacket(JsonObject layers) {
+        Instant timestamp = extractTimestamp(layers);
+        if (timestamp == null) return null;
+        String mmType = extractString(layers, "nas_5gs_mm_message_type");
+        String smType = extractString(layers, "nas_5gs_sm_message_type");
+        SignalingOperation operation = null;
+        if (mmType != null) operation = SignalingOperation.fromNas5gMmType(mmType);
+        if (operation == null && smType != null) operation = SignalingOperation.fromNas5gSmType(smType);
+        if (operation == null) return null;
+        String imsi = extractString(layers, "e212_imsi");
+        SubscriberIdentity subscriber = null;
+        if (imsi != null) {
+            String cleaned = imsi.replaceAll("[^0-9]", "");
+            if (cleaned.length() >= 14 && cleaned.length() <= 15) {
+                subscriber = SubscriberIdentity.fromImsi(cleaned);
+            }
+        }
+        if (subscriber == null) return null;
+        Map<String, String> params = new HashMap<>();
+        if (mmType != null) params.put("mmMessageType", mmType);
+        if (smType != null) params.put("smMessageType", smType);
+        if (imsi != null) params.put("imsi", imsi);
+        String cipherAlgo = extractString(layers, "nas_5gs_mm_nas_sec_algo_enc");
+        String integAlgo = extractString(layers, "nas_5gs_mm_nas_sec_algo_ip");
+        if (cipherAlgo != null) params.put("cipherAlgo", cipherAlgo);
+        if (integAlgo != null) params.put("integrityAlgo", integAlgo);
+        SignalingEvent.MessageType messageType = classify5gNasMessageType(operation);
+        return SignalingEvent.builder()
+                .timestamp(timestamp)
+                .protocolInterface(ProtocolInterface.FIVEG_NAS)
+                .operation(operation)
+                .subscriber(subscriber)
+                .parameters(params)
+                .direction(SignalingEvent.Direction.INTERNAL)
+                .messageType(messageType)
+                .build();
+    }
+
+    private SignalingEvent parseNgapPacket(JsonObject layers) {
+        Instant timestamp = extractTimestamp(layers);
+        if (timestamp == null) return null;
+        String procCodeStr = extractString(layers, "ngap_procedureCode");
+        if (procCodeStr == null) return null;
+        SignalingOperation operation = SignalingOperation.fromNgapProcedureCode(procCodeStr);
+        if (operation == null) return null;
+        String ranUeId = extractString(layers, "ngap_RAN_UE_NGAP_ID");
+        String amfUeId = extractString(layers, "ngap_AMF_UE_NGAP_ID");
+        String srcIp = extractString(layers, "ip_src");
+        String dstIp = extractString(layers, "ip_dst");
+        SubscriberIdentity subscriber = null;
+        String sessionKey = amfUeId != null ? amfUeId : ranUeId;
+        if (sessionKey != null) {
+            String digits = sessionKey.replaceAll("[^0-9]", "");
+            if (digits.length() > 0) {
+                String padded = ("000000000000000" + digits);
+                padded = padded.substring(padded.length() - 15);
+                try { subscriber = SubscriberIdentity.fromImsi(padded); } catch (Exception e) { }
+            }
+        }
+        if (subscriber == null) return null;
+        Map<String, String> params = new HashMap<>();
+        params.put("procedureCode", procCodeStr);
+        if (ranUeId != null) params.put("ranUeNgapId", ranUeId);
+        if (amfUeId != null) params.put("amfUeNgapId", amfUeId);
+        String tac = extractString(layers, "ngap_TAC");
+        String cause = extractString(layers, "ngap_Cause");
+        if (tac != null) params.put("tac", tac);
+        if (cause != null) params.put("cause", cause);
+        String sessionId = amfUeId != null ? "NGAP-AMF:" + amfUeId : null;
+        var builder = SignalingEvent.builder()
+                .timestamp(timestamp)
+                .protocolInterface(ProtocolInterface.NGAP)
+                .operation(operation)
+                .subscriber(subscriber)
+                .parameters(params)
+                .direction(SignalingEvent.Direction.INTERNAL)
+                .messageType(SignalingEvent.MessageType.UNKNOWN)
+                .sessionId(sessionId);
+        if (srcIp != null) builder.sourceNode(NetworkNode.fromGtpPeer(srcIp));
+        if (dstIp != null) builder.destinationNode(NetworkNode.fromGtpPeer(dstIp));
+        return builder.build();
+    }
+
+    private SignalingEvent parsePfcpPacket(JsonObject layers) {
+        Instant timestamp = extractTimestamp(layers);
+        if (timestamp == null) return null;
+        String msgTypeStr = extractString(layers, "pfcp_msg_type");
+        if (msgTypeStr == null) return null;
+        SignalingOperation operation = SignalingOperation.fromPfcpMsgType(msgTypeStr);
+        if (operation == null) return null;
+        String seid = extractString(layers, "pfcp_seid");
+        String srcIp = extractString(layers, "ip_src");
+        String dstIp = extractString(layers, "ip_dst");
+        String nodeId = extractString(layers, "pfcp_node_id_ipv4");
+        String fTeid = extractString(layers, "pfcp_f_teid_ipv4_addr");
+        String ueIp = extractString(layers, "pfcp_ue_ip_addr_ipv4");
+        String seqNum = extractString(layers, "pfcp_seqno");
+        SubscriberIdentity subscriber = null;
+        if (seid != null) {
+            String seidDigits = seid.replaceAll("[^0-9a-fA-F]", "");
+            if (seidDigits.length() > 0) {
+                try {
+                    long seidVal = Long.parseUnsignedLong(seidDigits, 16);
+                    String decDigits = String.valueOf(seidVal);
+                    String padded = ("000000000000000" + decDigits);
+                    padded = padded.substring(padded.length() - 15);
+                    subscriber = SubscriberIdentity.fromImsi(padded);
+                } catch (Exception e) {
+                    String padded = ("000000000000000" + seidDigits);
+                    padded = padded.substring(padded.length() - 15);
+                    try { subscriber = SubscriberIdentity.fromImsi(padded); } catch (Exception ex) { }
+                }
+            }
+        }
+        if (subscriber == null) return null;
+        Map<String, String> params = new HashMap<>();
+        params.put("pfcpMsgType", msgTypeStr);
+        if (seid != null) params.put("seid", seid);
+        if (nodeId != null) params.put("nodeId", nodeId);
+        if (fTeid != null) params.put("fTeid", fTeid);
+        if (ueIp != null) params.put("ueIp", ueIp);
+        if (seqNum != null) params.put("seqNum", seqNum);
+        String sessionId = seid != null ? "PFCP:" + seid : null;
+        int msgType;
+        try { msgType = Integer.parseInt(msgTypeStr); } catch (NumberFormatException e) { msgType = -1; }
+        SignalingEvent.MessageType messageType = (msgType > 0)
+                ? (msgType % 2 == 1 ? SignalingEvent.MessageType.REQUEST : SignalingEvent.MessageType.RESPONSE)
+                : SignalingEvent.MessageType.UNKNOWN;
+        var builder = SignalingEvent.builder()
+                .timestamp(timestamp)
+                .protocolInterface(ProtocolInterface.PFCP)
+                .operation(operation)
+                .subscriber(subscriber)
+                .parameters(params)
+                .direction(SignalingEvent.Direction.INTERNAL)
+                .messageType(messageType)
+                .sessionId(sessionId);
+        if (srcIp != null) builder.sourceNode(NetworkNode.fromGtpPeer(srcIp));
+        if (dstIp != null) builder.destinationNode(NetworkNode.fromGtpPeer(dstIp));
+        return builder.build();
+    }
+
+    private SignalingEvent.MessageType classify5gNasMessageType(SignalingOperation op) {
+        if (op == null) return SignalingEvent.MessageType.UNKNOWN;
+        String name = op.name();
+        if (name.contains("_REQUEST") || name.contains("_COMMAND") || name.contains("_REQ")) {
+            return SignalingEvent.MessageType.REQUEST;
+        }
+        if (name.contains("_REJECT") || name.contains("_FAILURE")) {
+            return SignalingEvent.MessageType.ERROR;
+        }
+        if (name.contains("_ACCEPT") || name.contains("_COMPLETE") || name.contains("_RESPONSE") || name.contains("_RSP")) {
+            return SignalingEvent.MessageType.RESPONSE;
+        }
+        return SignalingEvent.MessageType.UNKNOWN;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     //  JSON field extraction helpers
     // ════════════════════════════════════════════════════════════════
 
-    /**
-     * Extract timestamp from frame.time_epoch field.
-     * tshark EK format uses field names with dots replaced by underscores.
-     */
     private Instant extractTimestamp(JsonObject layers) {
         String epoch = extractString(layers, "frame_time_epoch");
         if (epoch == null) return null;
@@ -536,7 +791,7 @@ public class TsharkBridge {
                 String underscoredField = field.replace(".", "_").replace("-", "_");
                 
                 // Try common protocol prefixes
-                for (String proto : new String[]{"diameter", "gsm_map", "tcap", "sccp", "e212", "e164", "m3ua", "gtpv2"}) {
+                for (String proto : new String[]{"diameter", "gsm_map", "tcap", "sccp", "e212", "e164", "m3ua", "gtpv2", "nas_5gs", "ngap", "pfcp"}) {
                     JsonElement protoObj = layers.get(proto);
                     if (protoObj != null && protoObj.isJsonObject()) {
                         JsonObject protoLayers = protoObj.getAsJsonObject();

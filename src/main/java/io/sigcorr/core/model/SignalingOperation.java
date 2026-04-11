@@ -165,7 +165,61 @@ public enum SignalingOperation {
 
     /** GTPv2-C type 170 - Downlink data notification */
     GTP_DOWNLINK_DATA_NOTIFICATION(ProtocolInterface.GTPC_V2, 170,
-            "Downlink-Data-Notification", OperationCategory.SESSION);
+            "Downlink-Data-Notification", OperationCategory.SESSION),
+
+    // === 5G NAS Operations (3GPP TS 24.501) — v0.2 ===
+    NAS_5G_REGISTRATION_REQUEST(ProtocolInterface.FIVEG_NAS, 0x41, "RegistrationRequest", OperationCategory.RECONNAISSANCE),
+    NAS_5G_REGISTRATION_ACCEPT(ProtocolInterface.FIVEG_NAS, 0x42, "RegistrationAccept", OperationCategory.RECONNAISSANCE),
+    NAS_5G_REGISTRATION_REJECT(ProtocolInterface.FIVEG_NAS, 0x43, "RegistrationReject", OperationCategory.MANIPULATION),
+    NAS_5G_REGISTRATION_COMPLETE(ProtocolInterface.FIVEG_NAS, 0x44, "RegistrationComplete", OperationCategory.RECONNAISSANCE),
+    NAS_5G_DEREGISTRATION_REQUEST_UE(ProtocolInterface.FIVEG_NAS, 0x45, "DeregistrationRequestUE", OperationCategory.MANIPULATION),
+    NAS_5G_DEREGISTRATION_REQUEST_NW(ProtocolInterface.FIVEG_NAS, 0x46, "DeregistrationRequestNW", OperationCategory.MANIPULATION),
+    NAS_5G_DEREGISTRATION_ACCEPT(ProtocolInterface.FIVEG_NAS, 0x47, "DeregistrationAccept", OperationCategory.MANIPULATION),
+    NAS_5G_AUTH_REQUEST(ProtocolInterface.FIVEG_NAS, 0x56, "AuthenticationRequest", OperationCategory.INTERCEPTION),
+    NAS_5G_AUTH_RESPONSE(ProtocolInterface.FIVEG_NAS, 0x57, "AuthenticationResponse", OperationCategory.INTERCEPTION),
+    NAS_5G_AUTH_REJECT(ProtocolInterface.FIVEG_NAS, 0x58, "AuthenticationReject", OperationCategory.INTERCEPTION),
+    NAS_5G_AUTH_FAILURE(ProtocolInterface.FIVEG_NAS, 0x59, "AuthenticationFailure", OperationCategory.INTERCEPTION),
+    NAS_5G_IDENTITY_REQUEST(ProtocolInterface.FIVEG_NAS, 0x5b, "IdentityRequest", OperationCategory.RECONNAISSANCE),
+    NAS_5G_IDENTITY_RESPONSE(ProtocolInterface.FIVEG_NAS, 0x5c, "IdentityResponse", OperationCategory.RECONNAISSANCE),
+    NAS_5G_SECURITY_MODE_COMMAND(ProtocolInterface.FIVEG_NAS, 0x5d, "SecurityModeCommand", OperationCategory.INTERCEPTION),
+    NAS_5G_SECURITY_MODE_COMPLETE(ProtocolInterface.FIVEG_NAS, 0x5e, "SecurityModeComplete", OperationCategory.INTERCEPTION),
+    NAS_5G_SECURITY_MODE_REJECT(ProtocolInterface.FIVEG_NAS, 0x5f, "SecurityModeReject", OperationCategory.INTERCEPTION),
+    NAS_5G_SERVICE_REQUEST(ProtocolInterface.FIVEG_NAS, 0x4c, "ServiceRequest", OperationCategory.RECONNAISSANCE),
+    NAS_5G_PDU_SESSION_ESTABLISHMENT_REQ(ProtocolInterface.FIVEG_NAS, 0xc1, "PDUSessionEstablishmentRequest", OperationCategory.MANIPULATION),
+    NAS_5G_PDU_SESSION_MODIFICATION_REQ(ProtocolInterface.FIVEG_NAS, 0xc9, "PDUSessionModificationRequest", OperationCategory.MANIPULATION),
+    NAS_5G_PDU_SESSION_RELEASE_REQUEST(ProtocolInterface.FIVEG_NAS, 0xd1, "PDUSessionReleaseRequest", OperationCategory.MANIPULATION),
+    NAS_5G_AUTHENTICATION_REQUEST(ProtocolInterface.FIVEG_NAS, 0x56, "AuthenticationRequest", OperationCategory.INTERCEPTION),		
+
+    // === NGAP Operations (3GPP TS 38.413) — v0.2 ===
+    NGAP_INITIAL_UE_MESSAGE(ProtocolInterface.NGAP, 15, "InitialUEMessage", OperationCategory.RECONNAISSANCE),
+    NGAP_INITIAL_CONTEXT_SETUP_REQ(ProtocolInterface.NGAP, 14, "InitialContextSetupRequest", OperationCategory.MANIPULATION),
+    NGAP_UE_CONTEXT_RELEASE_COMMAND(ProtocolInterface.NGAP, 41, "UEContextReleaseCommand", OperationCategory.MANIPULATION),
+    NGAP_UE_CONTEXT_RELEASE_REQUEST(ProtocolInterface.NGAP, 42, "UEContextReleaseRequest", OperationCategory.MANIPULATION),
+    NGAP_HANDOVER_REQUIRED(ProtocolInterface.NGAP, 0, "HandoverRequired", OperationCategory.MANIPULATION),
+    NGAP_HANDOVER_REQUEST(ProtocolInterface.NGAP, 1, "HandoverRequest", OperationCategory.MANIPULATION),
+    NGAP_HANDOVER_NOTIFY(ProtocolInterface.NGAP, 3, "HandoverNotify", OperationCategory.MANIPULATION),
+    NGAP_PATH_SWITCH_REQUEST(ProtocolInterface.NGAP, 12, "PathSwitchRequest", OperationCategory.MANIPULATION),
+    NGAP_NG_SETUP_REQUEST(ProtocolInterface.NGAP, 21, "NGSetupRequest", OperationCategory.RECONNAISSANCE),
+    NGAP_DOWNLINK_NAS_TRANSPORT(ProtocolInterface.NGAP, 25, "DownlinkNASTransport", OperationCategory.INTERCEPTION),
+    NGAP_UPLINK_NAS_TRANSPORT(ProtocolInterface.NGAP, 46, "UplinkNASTransport", OperationCategory.INTERCEPTION),
+    NGAP_PAGING(ProtocolInterface.NGAP, 5, "Paging", OperationCategory.TRACKING),
+    NGAP_PDU_SESSION_RESOURCE_SETUP_REQ(ProtocolInterface.NGAP, 26, "PDUSessionResourceSetupRequest", OperationCategory.MANIPULATION),
+    NGAP_PDU_SESSION_RESOURCE_RELEASE_CMD(ProtocolInterface.NGAP, 27, "PDUSessionResourceReleaseCommand", OperationCategory.MANIPULATION),
+    NGAP_PDU_SESSION_RESOURCE_MODIFY_REQ(ProtocolInterface.NGAP, 28, "PDUSessionResourceModifyRequest", OperationCategory.MANIPULATION),
+
+    // === PFCP Operations (3GPP TS 29.244) — v0.2 ===
+    PFCP_HEARTBEAT_REQ(ProtocolInterface.PFCP, 1, "HeartbeatRequest", OperationCategory.RECONNAISSANCE),
+    PFCP_HEARTBEAT_RSP(ProtocolInterface.PFCP, 2, "HeartbeatResponse", OperationCategory.RECONNAISSANCE),
+    PFCP_ASSOCIATION_SETUP_REQ(ProtocolInterface.PFCP, 5, "AssociationSetupRequest", OperationCategory.RECONNAISSANCE),
+    PFCP_ASSOCIATION_SETUP_RSP(ProtocolInterface.PFCP, 6, "AssociationSetupResponse", OperationCategory.RECONNAISSANCE),
+    PFCP_SESSION_ESTABLISHMENT_REQ(ProtocolInterface.PFCP, 50, "SessionEstablishmentRequest", OperationCategory.MANIPULATION),
+    PFCP_SESSION_ESTABLISHMENT_RSP(ProtocolInterface.PFCP, 51, "SessionEstablishmentResponse", OperationCategory.MANIPULATION),
+    PFCP_SESSION_MODIFICATION_REQ(ProtocolInterface.PFCP, 52, "SessionModificationRequest", OperationCategory.MANIPULATION),
+    PFCP_SESSION_MODIFICATION_RSP(ProtocolInterface.PFCP, 53, "SessionModificationResponse", OperationCategory.MANIPULATION),
+    PFCP_SESSION_DELETION_REQ(ProtocolInterface.PFCP, 54, "SessionDeletionRequest", OperationCategory.MANIPULATION),
+    PFCP_SESSION_DELETION_RSP(ProtocolInterface.PFCP, 55, "SessionDeletionResponse", OperationCategory.MANIPULATION),
+    PFCP_SESSION_REPORT_REQ(ProtocolInterface.PFCP, 56, "SessionReportRequest", OperationCategory.MANIPULATION),
+    PFCP_SESSION_REPORT_RSP(ProtocolInterface.PFCP, 57, "SessionReportResponse", OperationCategory.MANIPULATION);
 
     private final ProtocolInterface protocolInterface;
     private final int operationCode;
@@ -245,5 +299,92 @@ public enum SignalingOperation {
             }
         }
         return null;
+    }
+
+    /**
+     * Look up a 5G NAS Mobility Management operation by message type string.
+     * Accepts both hex ("0x41") and decimal ("65") forms from tshark.
+     */
+    public static SignalingOperation fromNas5gMmType(String typeStr) {
+        if (typeStr == null) return null;
+        int code = parse5gTypeCode(typeStr);
+        if (code < 0) return null;
+        for (SignalingOperation op : values()) {
+            if (op.protocolInterface == ProtocolInterface.FIVEG_NAS
+                    && op.operationCode == code
+                    && !op.name().contains("PDU_SESSION")) {
+                return op;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Look up a 5G NAS Session Management operation by message type string.
+     * Accepts both hex ("0xc1") and decimal ("193") forms from tshark.
+     */
+    public static SignalingOperation fromNas5gSmType(String typeStr) {
+        if (typeStr == null) return null;
+        int code = parse5gTypeCode(typeStr);
+        if (code < 0) return null;
+        for (SignalingOperation op : values()) {
+            if (op.protocolInterface == ProtocolInterface.FIVEG_NAS
+                    && op.operationCode == code
+                    && op.name().contains("PDU_SESSION")) {
+                return op;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Look up an NGAP operation by procedure code string.
+     */
+    public static SignalingOperation fromNgapProcedureCode(String codeStr) {
+        if (codeStr == null) return null;
+        int code;
+        try { code = Integer.parseInt(codeStr.trim()); }
+        catch (NumberFormatException e) { return null; }
+        for (SignalingOperation op : values()) {
+            if (op.protocolInterface == ProtocolInterface.NGAP
+                    && op.operationCode == code) {
+                return op;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Look up a PFCP operation by message type string.
+     */
+    public static SignalingOperation fromPfcpMsgType(String typeStr) {
+        if (typeStr == null) return null;
+        int code;
+        try { code = Integer.parseInt(typeStr.trim()); }
+        catch (NumberFormatException e) { return null; }
+        for (SignalingOperation op : values()) {
+            if (op.protocolInterface == ProtocolInterface.PFCP
+                    && op.operationCode == code) {
+                return op;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Parse a 5G NAS type code from hex or decimal string.
+     * tshark outputs "0x41" or "65" depending on version.
+     */
+    private static int parse5gTypeCode(String typeStr) {
+        typeStr = typeStr.trim().toLowerCase();
+        try {
+            if (typeStr.startsWith("0x")) {
+                return Integer.parseInt(typeStr.substring(2), 16);
+            }
+            return Integer.parseInt(typeStr);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+
     }
 }

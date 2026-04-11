@@ -135,7 +135,7 @@ public class SigCorrMain {
             List<SignalingEvent> events = bridge.decodePcap(path);
 
             if (events.isEmpty()) {
-                System.out.println("No SS7/Diameter/GTP signaling events found in " + pcapPath);
+                System.out.println("No SS7/Diameter/GTP/5G signaling events found in " + pcapPath);
                 return;
             }
             if (!quiet) System.out.printf("Decoded %d signaling events%n%n", events.size());

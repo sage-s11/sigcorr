@@ -19,7 +19,12 @@ public enum ProtocolInterface {
     DIAMETER_S6A("Diameter/S6a", "MME to HSS", ProtocolFamily.DIAMETER),
     DIAMETER_S6D("Diameter/S6d", "SGSN to HSS", ProtocolFamily.DIAMETER),
     DIAMETER_SWX("Diameter/SWx", "Non-3GPP AAA to HSS", ProtocolFamily.DIAMETER),
-    GTPC_V2("GTPv2-C", "GTP Control Plane v2", ProtocolFamily.GTP);
+    GTPC_V2("GTPv2-C", "GTP Control Plane v2", ProtocolFamily.GTP),
+
+    // === 5G SA Protocols (v0.2) ===
+    FIVEG_NAS("5G-NAS", "UE to AMF Non-Access Stratum", ProtocolFamily.FIVEG),
+    NGAP("NGAP", "gNB to AMF N2 Interface", ProtocolFamily.FIVEG),
+    PFCP("PFCP", "SMF to UPF N4 Session Management", ProtocolFamily.FIVEG);
 
     private final String displayName;
     private final String description;
@@ -35,7 +40,13 @@ public enum ProtocolInterface {
     public String getDescription() { return description; }
     public ProtocolFamily getFamily() { return family; }
 
+    /** Returns true if this is a 5G-specific protocol interface. */
+    public boolean is5G() { return family == ProtocolFamily.FIVEG; }
+
+    /** Returns true if this is a legacy (pre-5G SA) protocol. */
+    public boolean isLegacy() { return family != ProtocolFamily.FIVEG; }
+
     public enum ProtocolFamily {
-        SS7, DIAMETER, GTP
+        SS7, DIAMETER, GTP, FIVEG
     }
 }

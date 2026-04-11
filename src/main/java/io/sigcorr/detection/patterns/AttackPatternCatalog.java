@@ -4,6 +4,8 @@ import io.sigcorr.core.model.SignalingOperation;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Catalog of known cross-interface attack patterns.
@@ -12,8 +14,15 @@ import java.util.*;
  * - ENEA AdaptiveMobile threat reports
  * - GSMA IR.82 (SS7 Security Monitoring Guidelines)
  * - GSMA FS.11 (SS7/Diameter Interconnect Security)
+ * - GSMA FS.40 (5G Security Considerations)
  * - SRLabs "Locating Mobile Phones using SS7" (2014)
  * - Positive Technologies "SS7 Vulnerabilities and Attack Exposure" reports
+ * - 3GPP TS 33.501 (5G Security Architecture)
+ * - ENISA 5G Threat Landscape (2019, 2021)
+ * - Hussain et al. "5GReasoner" (CCS 2019)
+ *
+ * Patterns ATK-001..ATK-022: Legacy SS7/MAP, Diameter S6a, GTPv2-C
+ * Patterns ATK-023..ATK-029: 5G NAS, NGAP, PFCP (see FiveGAttackPatterns)
  *
  * Each pattern represents a documented multi-step attack that requires
  * cross-interface correlation to detect reliably.
@@ -69,9 +78,23 @@ public final class AttackPatternCatalog {
     }
 
     /**
-     * Get all built-in attack patterns.
+     * Get all built-in attack patterns (legacy + 5G).
+     *
+     * Returns 29 patterns total:
+     *   ATK-001..ATK-022: SS7/MAP, Diameter S6a, GTPv2-C (this class)
+     *   ATK-023..ATK-029: 5G NAS, NGAP, PFCP (FiveGAttackPatterns)
      */
     public static List<AttackPattern> getAllPatterns() {
+        return Stream.concat(
+                getLegacyPatterns().stream(),
+                FiveGAttackPatterns.all().stream()
+        ).collect(Collectors.toUnmodifiableList());
+    }
+
+    /**
+     * Get only legacy (2G/3G/4G) attack patterns — ATK-001..ATK-022.
+     */
+    public static List<AttackPattern> getLegacyPatterns() {
         return List.of(
                 silentLocationTracking(),
                 interceptionSetup(),
@@ -83,7 +106,6 @@ public final class AttackPatternCatalog {
                 crossProtocolReconnaissance(),
                 diameterReconWithSession(),
                 diameterLocationHijack(),
-                // New patterns
                 smsInterception(),
                 smsRoutingHijack(),
                 locationTrackingViaSms(),
@@ -97,6 +119,14 @@ public final class AttackPatternCatalog {
                 imsiCatcherDetection(),
                 crossProtocolDoS()
         );
+    }
+
+    /**
+     * Get only 5G attack patterns — ATK-023..ATK-029.
+     * Delegates to {@link FiveGAttackPatterns#all()}.
+     */
+    public static List<AttackPattern> getFiveGPatterns() {
+        return FiveGAttackPatterns.all();
     }
 
     /**

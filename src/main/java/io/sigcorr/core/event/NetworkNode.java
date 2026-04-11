@@ -98,7 +98,8 @@ public final class NetworkNode {
         GLOBAL_TITLE("GT"),
         DIAMETER_HOST("DIA"),
         GTP_PEER("GTP"),
-        UNKNOWN("UNK");
+        UNKNOWN("UNK"),
+        IP_ADDRESS("IP");
 
         private final String prefix;
 

@@ -2,3 +2,13 @@ evidence/
 dependency-reduced-pom.xml
 target/
 .idea/
+
+# Large test pcap datasets (not for repo)
+test-pcaps/5GAD/
+test-pcaps/5GDatasets/
+test-pcaps/DLTeamTUC_attacks/
+test-pcaps/colte/
+test-pcaps/*.zip
+test-pcaps/sa.pcap
+test-pcaps/free5gc_telekom.pcap
+test-pcaps/5g-sa.pcap
