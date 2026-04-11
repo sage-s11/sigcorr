@@ -12,3 +12,28 @@ test-pcaps/*.zip
 test-pcaps/sa.pcap
 test-pcaps/free5gc_telekom.pcap
 test-pcaps/5g-sa.pcap
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backup files
+*.bak
+*.orig
+*.backup
+
+# Downloaded public pcap samples (not original to this project)
+test-pcaps/18328-*.pcap
+test-pcaps/*SCAPv2*.pcap
+test-pcaps/Esy-*.pcap
+test-pcaps/EsyAndGy-*.pcap
+test-pcaps/Gx-*.pcap
+test-pcaps/ansi_map_win.pcap
+test-pcaps/ansi_tcap_mtp2.pcap
+test-pcaps/ccr-money-*.pcap
+test-pcaps/complete_conf_*.pcap
+test-pcaps/diameter_s6a.pcap
+test-pcaps/free5gc*.pcap
+test-pcaps/merge_*.pcap
+test-pcaps/packlog_ss7.cap
+test-pcaps/scapv2-*.pcap
