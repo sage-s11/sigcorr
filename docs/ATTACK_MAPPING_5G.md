@@ -1,7 +1,4 @@
 # SigCorr Attack Pattern Mapping — 5G Extensions (v0.2)
-
-> Append this section to your existing ATTACK_MAPPING.md
-
 ---
 
 ## 5G Attack Patterns (ATK-022 – ATK-027)
