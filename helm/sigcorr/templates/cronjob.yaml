@@ -1,0 +1,99 @@
+{{- if eq .Values.mode "cronjob" -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "sigcorr.fullname" . }}
+  labels:
+    {{- include "sigcorr.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.job.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
+      template:
+        metadata:
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "sigcorr.selectorLabels" . | nindent 12 }}
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "sigcorr.serviceAccountName" . }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          restartPolicy: Never
+          containers:
+            - name: sigcorr
+              image: {{ include "sigcorr.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["analyze", {{ .Values.job.pcapPath | quote }}]
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              {{- with .Values.extraEnv }}
+              env:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: config
+                  mountPath: /sigcorr/sigcorr-config.yaml
+                  subPath: sigcorr-config.yaml
+                  readOnly: true
+                - name: pcaps
+                  mountPath: /data/pcaps
+                  readOnly: true
+                - name: evidence
+                  mountPath: /sigcorr/evidence
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "sigcorr.fullname" . }}-config
+            - name: pcaps
+              {{- if .Values.pcap.existingClaim }}
+              persistentVolumeClaim:
+                claimName: {{ .Values.pcap.existingClaim }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: evidence
+              {{- if .Values.evidence.existingClaim }}
+              persistentVolumeClaim:
+                claimName: {{ .Values.evidence.existingClaim }}
+              {{- else if .Values.evidence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "sigcorr.fullname" . }}-evidence
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

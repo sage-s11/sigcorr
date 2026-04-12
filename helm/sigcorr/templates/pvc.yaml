@@ -1,0 +1,17 @@
+{{- if and .Values.evidence.enabled (not .Values.evidence.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sigcorr.fullname" . }}-evidence
+  labels:
+    {{- include "sigcorr.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.evidence.storageClass }}
+  storageClassName: {{ .Values.evidence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.evidence.size }}
+{{- end }}

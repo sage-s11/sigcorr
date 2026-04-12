@@ -1,0 +1,23 @@
+apiVersion: v2
+name: sigcorr
+description: >-
+  Passive Cross-Protocol Attack Detection for Mobile Core Networks.
+  Detects cross-protocol attack chains spanning SS7/MAP, Diameter S6a,
+  and GTPv2-C through unified subscriber identity correlation.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - telecom
+  - security
+  - ss7
+  - diameter
+  - gtp
+  - pcap
+  - attack-detection
+home: https://github.com/sage-s11/sigcorr
+sources:
+  - https://github.com/sage-s11/sigcorr
+maintainers:
+  - name: sage-s11
+    url: https://github.com/sage-s11

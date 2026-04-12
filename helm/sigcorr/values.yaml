@@ -1,0 +1,96 @@
+# SigCorr Helm Chart - Default Values
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/sage-s11/sigcorr
+  pullPolicy: IfNotPresent
+  # Overrides the image tag (default is appVersion)
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── SigCorr Configuration ───────────────────────────────────
+config:
+  tshark:
+    path: /usr/bin/tshark
+    timeout: 30s
+  correlation:
+    temporalWindow: 30s
+    inferenceWindow: 10s
+  detection:
+    minConfidence: 70
+    # "all" or list like ["ATK-001", "ATK-002", "ATK-003"]
+    enabledPatterns: "all"
+  output:
+    evidenceDir: /sigcorr/evidence
+    extractPcap: true
+
+# ── PCAP Input ──────────────────────────────────────────────
+pcap:
+  # Mount a PVC containing pcap files
+  existingClaim: ""
+  # Or use emptyDir and upload via: kubectl cp capture.pcap <pod>:/data/pcaps/
+  emptyDir: true
+
+# ── Evidence Output ─────────────────────────────────────────
+evidence:
+  enabled: true
+  size: 5Gi
+  storageClass: ""
+  existingClaim: ""
+
+# ── Execution Mode ──────────────────────────────────────────
+# SigCorr is a batch pcap analyzer — runs as Job or CronJob.
+mode: job  # "job" or "cronjob"
+
+job:
+  pcapPath: /data/pcaps/capture.pcap
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 600
+
+cronjob:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+# ── Pod Settings ────────────────────────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+    add: [NET_RAW]  # tshark needs this
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraEnv: []
+extraVolumeMounts: []
+extraVolumes: []

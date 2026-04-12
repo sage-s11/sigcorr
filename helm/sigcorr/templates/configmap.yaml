@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sigcorr.fullname" . }}-config
+  labels:
+    {{- include "sigcorr.labels" . | nindent 4 }}
+data:
+  sigcorr-config.yaml: |
+    sigcorr:
+      tshark:
+        path: {{ .Values.config.tshark.path }}
+        timeout: {{ .Values.config.tshark.timeout }}
+      correlation:
+        temporal_window: {{ .Values.config.correlation.temporalWindow }}
+        inference_window: {{ .Values.config.correlation.inferenceWindow }}
+      detection:
+        min_confidence: {{ .Values.config.detection.minConfidence }}
+        enabled_patterns:
+          {{- if eq (kindOf .Values.config.detection.enabledPatterns) "string" }}
+          - {{ .Values.config.detection.enabledPatterns }}
+          {{- else }}
+          {{- range .Values.config.detection.enabledPatterns }}
+          - {{ . }}
+          {{- end }}
+          {{- end }}
+      output:
+        evidence_dir: {{ .Values.config.output.evidenceDir }}
+        extract_pcap: {{ .Values.config.output.extractPcap }}

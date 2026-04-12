@@ -1,0 +1,30 @@
+══════════════════════════════════════════════════════════════
+ SigCorr v{{ .Chart.AppVersion }}
+ Cross-Protocol Signaling Security Correlator
+══════════════════════════════════════════════════════════════
+{{- if eq .Values.mode "job" }}
+
+Deployed as: Job (one-off analysis)
+PCAP path:   {{ .Values.job.pcapPath }}
+
+1. Upload your pcap:
+   kubectl cp capture.pcap {{ .Release.Namespace }}/$(kubectl get pods -l app.kubernetes.io/name={{ include "sigcorr.name" . }} -n {{ .Release.Namespace }} -o jsonpath='{.items[0].metadata.name}'):/data/pcaps/capture.pcap
+
+2. Check results:
+   kubectl logs -l app.kubernetes.io/name={{ include "sigcorr.name" . }} -n {{ .Release.Namespace }}
+
+3. Extract evidence:
+   kubectl cp {{ .Release.Namespace }}/$(kubectl get pods -l app.kubernetes.io/name={{ include "sigcorr.name" . }} -n {{ .Release.Namespace }} -o jsonpath='{.items[0].metadata.name}'):/sigcorr/evidence ./evidence
+{{- end }}
+{{- if eq .Values.mode "cronjob" }}
+
+Deployed as: CronJob
+Schedule:    {{ .Values.cronjob.schedule }}
+PCAP path:   {{ .Values.job.pcapPath }}
+
+View upcoming runs:
+  kubectl get cronjob {{ include "sigcorr.fullname" . }} -n {{ .Release.Namespace }}
+
+View past job logs:
+  kubectl logs -l app.kubernetes.io/name={{ include "sigcorr.name" . }} -n {{ .Release.Namespace }} --tail=100
+{{- end }}
